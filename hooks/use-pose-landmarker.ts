@@ -2,8 +2,16 @@
 
 import { useEffect, useRef, useState } from "react"
 import type { PoseKeypoint } from "@/lib/types"
+import type { PoseConnection } from "@/lib/pose-connections"
+import { PoseStabilizer } from "@/lib/pose-stabilizer"
 
-const WASM_BASE_URL = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22-rc.20250304/wasm"
+/**
+ * Must match the exact @mediapipe/tasks-vision version pinned in package.json.
+ * The JS bundle and the WASM runtime are released together and are not
+ * guaranteed to be compatible across versions.
+ */
+const MEDIAPIPE_VERSION = "1.0.1"
+const WASM_BASE_URL = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MEDIAPIPE_VERSION}/wasm`
 const MODEL_ASSET_URL =
   "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task"
 
@@ -14,27 +22,34 @@ interface UsePoseLandmarkerOptions {
 }
 
 interface UsePoseLandmarkerResult {
+  /** Stabilized pose for the current frame. Every gesture detector consumes this same result. */
   landmarks: PoseKeypoint[] | null
+  /** Same pose as `landmarks`, readable without a React render (used by the canvas overlay). */
+  poseRef: React.RefObject<PoseKeypoint[] | null>
+  /** PoseLandmarker.POSE_CONNECTIONS, available once the model has loaded. */
+  connections: PoseConnection[]
   personDetected: boolean
   isModelLoading: boolean
   error: string | null
 }
 
 /**
- * Loads MediaPipe's PoseLandmarker (client-side, WASM/GPU) and runs a live
+ * Loads a single MediaPipe PoseLandmarker (client-side, WASM) and runs a live
  * detection loop against the given video element. All inference happens
  * on-device; no frames are sent anywhere.
  */
 export function usePoseLandmarker({ videoRef, active }: UsePoseLandmarkerOptions): UsePoseLandmarkerResult {
   const [landmarks, setLandmarks] = useState<PoseKeypoint[] | null>(null)
+  const [connections, setConnections] = useState<PoseConnection[]>([])
   const [personDetected, setPersonDetected] = useState(false)
   const [isModelLoading, setIsModelLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Using `any` for the model instance to avoid a hard dependency on
-  // @mediapipe/tasks-vision types at the hook boundary; it's dynamically
-  // imported so this module is never pulled into the server bundle.
+  // Typed loosely because @mediapipe/tasks-vision is dynamically imported so it
+  // never ends up in the server bundle.
   const landmarkerRef = useRef<any>(null)
+  const poseRef = useRef<PoseKeypoint[] | null>(null)
+  const stabilizerRef = useRef(new PoseStabilizer())
   const rafRef = useRef<number | null>(null)
   const lastVideoTimeRef = useRef(-1)
 
@@ -47,14 +62,20 @@ export function usePoseLandmarker({ videoRef, active }: UsePoseLandmarkerOptions
         const vision = await FilesetResolver.forVisionTasks(WASM_BASE_URL)
         if (cancelled) return
 
-        const landmarker = await PoseLandmarker.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: MODEL_ASSET_URL,
-            delegate: "GPU",
-          },
-          runningMode: "VIDEO",
-          numPoses: 1,
-        })
+        const create = (delegate: "GPU" | "CPU") =>
+          PoseLandmarker.createFromOptions(vision, {
+            baseOptions: { modelAssetPath: MODEL_ASSET_URL, delegate },
+            runningMode: "VIDEO",
+            numPoses: 1,
+          })
+
+        let landmarker
+        try {
+          landmarker = await create("GPU")
+        } catch {
+          // Some browsers/devices can't create a WebGL2 context for the GPU delegate.
+          landmarker = await create("CPU")
+        }
 
         if (cancelled) {
           landmarker.close()
@@ -62,6 +83,7 @@ export function usePoseLandmarker({ videoRef, active }: UsePoseLandmarkerOptions
         }
 
         landmarkerRef.current = landmarker
+        setConnections(PoseLandmarker.POSE_CONNECTIONS.map((c) => ({ start: c.start, end: c.end })))
         setIsModelLoading(false)
       } catch (err) {
         if (cancelled) return
@@ -85,19 +107,34 @@ export function usePoseLandmarker({ videoRef, active }: UsePoseLandmarkerOptions
       return
     }
 
+    const stabilizer = stabilizerRef.current
+    stabilizer.reset()
+
     function loop() {
       const video = videoRef.current
       const landmarker = landmarkerRef.current
-      if (video && landmarker && video.readyState >= 2 && video.currentTime !== lastVideoTimeRef.current) {
+      if (
+        video &&
+        landmarker &&
+        video.readyState >= 2 &&
+        video.videoWidth > 0 &&
+        video.currentTime !== lastVideoTimeRef.current
+      ) {
         lastVideoTimeRef.current = video.currentTime
-        const result = landmarker.detectForVideo(video, performance.now())
-        const pose = result.landmarks?.[0]
-        if (pose) {
-          setLandmarks(pose as PoseKeypoint[])
-          setPersonDetected(true)
-        } else {
-          setLandmarks(null)
-          setPersonDetected(false)
+        const now = performance.now()
+        let raw: PoseKeypoint[] | undefined
+        try {
+          const result = landmarker.detectForVideo(video, now)
+          raw = result.landmarks?.[0] as PoseKeypoint[] | undefined
+        } catch {
+          raw = undefined
+        }
+
+        const pose = stabilizer.process(raw, now, video.videoWidth / video.videoHeight)
+        if (pose !== poseRef.current) {
+          poseRef.current = pose
+          setLandmarks(pose)
+          setPersonDetected(pose !== null)
         }
       }
       rafRef.current = requestAnimationFrame(loop)
@@ -110,5 +147,5 @@ export function usePoseLandmarker({ videoRef, active }: UsePoseLandmarkerOptions
     }
   }, [active, isModelLoading, error, videoRef])
 
-  return { landmarks, personDetected, isModelLoading, error }
+  return { landmarks, poseRef, connections, personDetected, isModelLoading, error }
 }

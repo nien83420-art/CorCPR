@@ -31,7 +31,7 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
   const { videoRef, videoCallbackRef, status: cameraStatus, errorMessage, retry } = useCamera({ active: true })
   const cameraReady = cameraStatus === "granted"
 
-  const { landmarks, personDetected, isModelLoading, error: modelError } = usePoseLandmarker({
+  const { landmarks, poseRef, connections, personDetected, isModelLoading, error: modelError } = usePoseLandmarker({
     videoRef,
     active: cameraReady,
   })
@@ -220,7 +220,12 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
             muted
             className="size-full object-cover"
           />
-          <PoseOverlayCanvas videoRef={videoRef} landmarks={landmarks} className="absolute inset-0 size-full" />
+          <PoseOverlayCanvas
+            videoRef={videoRef}
+            poseRef={poseRef}
+            connections={connections}
+            className="absolute inset-0 size-full"
+          />
         </div>
 
         <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center p-3">
