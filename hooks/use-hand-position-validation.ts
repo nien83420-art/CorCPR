@@ -16,8 +16,21 @@ const MIN_ALIGNMENT_RATIO = 0.1
 /** How long the correct posture must be held continuously before the stage completes. */
 const STABLE_DURATION_MS = 600
 
-export type HandPositionReason = "MISSING_LANDMARKS" | "ELBOWS_BENT" | "WRISTS_TOO_FAR" | "SHOULDER_ALIGNMENT" | "VALID"
-export type HandPositionFeedback = "straightenElbows" | "bringWristsTogether" | "shouldersOverHands" | null
+export type HandPositionReason =
+  | "MISSING_LANDMARKS"
+  | "LEFT_ELBOW_BENT"
+  | "RIGHT_ELBOW_BENT"
+  | "BOTH_ELBOWS_BENT"
+  | "WRISTS_TOO_FAR"
+  | "SHOULDER_ALIGNMENT"
+  | "VALID"
+export type HandPositionFeedback =
+  | "straightenLeftElbow"
+  | "straightenRightElbow"
+  | "straightenElbows"
+  | "bringWristsTogether"
+  | "shouldersOverHands"
+  | null
 
 interface HandPositionDebug {
   leftElbowAngle: number | null
