@@ -88,7 +88,17 @@ export type RejectionReason =
 
 interface CompressionDebug {
   phase: MotionPhase
+  /** Effective pose validity: true if this frame's pose is trustworthy, OR a transient loss is
+   *  still within the grace window (state is being preserved off the last reliable pose). This
+   *  is what the state machine actually acts on. */
   poseValid: boolean
+  /** This exact frame's raw pose validity, with no grace applied. Can be false while
+   *  `poseValid`/`effectivePoseValid` is still true (mid grace-window). */
+  rawPoseValid: boolean
+  /** Alias of `poseValid`, spelled out for debug clarity. Always equal to `poseValid`. */
+  effectivePoseValid: boolean
+  /** How long (ms) the raw pose has been continuously invalid, or 0 while raw-valid. */
+  invalidDurationMs: number
   /** Kept for backwards compatibility with existing debug UI; mirrors `phase`. */
   motionPhase: MotionPhase
   reason: PoseInvalidReason
@@ -122,6 +132,9 @@ interface UseCompressionCounterResult {
 const INITIAL_DEBUG: CompressionDebug = {
   phase: "ready",
   poseValid: false,
+  rawPoseValid: false,
+  effectivePoseValid: false,
+  invalidDurationMs: 0,
   motionPhase: "ready",
   reason: "MISSING_LANDMARKS",
   rejectionReason: "POSE_LOST",
@@ -282,18 +295,26 @@ export function useCompressionCounter(targetCount: number): UseCompressionCounte
         }
       }
 
-      // --- Step 2: grace period. A single bad frame doesn't cancel an in-progress stroke. ---
+      // --- Step 2: grace period. A single bad frame doesn't cancel an in-progress stroke, and it
+      // must not wipe the resting baseline either - otherwise a transient blip that happens to
+      // land while we're still in "ready" (e.g. right as the downstroke begins) corrupts the
+      // reference point for the whole cycle that follows, even though the cycle itself never
+      // gets to "start". So grace protection applies uniformly to every phase, "ready" included:
+      // only *sustained* invalid posture (past GRACE_MS) is allowed to reset anything.
       if (!poseValid) {
         if (invalidSinceRef.current === null) invalidSinceRef.current = now
         const invalidElapsed = now - invalidSinceRef.current
 
-        if (invalidElapsed <= GRACE_MS && phaseRef.current !== "ready") {
-          // Within grace: freeze the stroke exactly where it was and just report the current
-          // (invalid) frame's diagnostics without advancing or cancelling anything.
+        if (invalidElapsed <= GRACE_MS) {
+          // Within grace: freeze everything exactly where it was (phase, baseline, stroke
+          // tracking all untouched) and just report the current (invalid) frame's diagnostics.
           setDebug({
             phase: phaseRef.current,
             motionPhase: phaseRef.current,
-            poseValid: false,
+            poseValid: true,
+            rawPoseValid: false,
+            effectivePoseValid: true,
+            invalidDurationMs: invalidElapsed,
             reason: invalidReason,
             rejectionReason: rejectionForInvalid,
             leftElbowAngle,
@@ -311,13 +332,16 @@ export function useCompressionCounter(targetCount: number): UseCompressionCounte
           return
         }
 
-        // Either no stroke was in progress, or the grace period has been exceeded: cancel any
-        // in-progress stroke so a later reappearance can't be mistaken for a continuation of it.
+        // Sustained invalid posture past the grace window: cancel any in-progress stroke (and
+        // the baseline, so a later reappearance can't be mistaken for a continuation of it).
         cancelStroke()
         setDebug({
           phase: "ready",
           motionPhase: "ready",
           poseValid: false,
+          rawPoseValid: false,
+          effectivePoseValid: false,
+          invalidDurationMs: invalidElapsed,
           reason: invalidReason,
           rejectionReason: rejectionForInvalid,
           leftElbowAngle,
@@ -478,6 +502,9 @@ export function useCompressionCounter(targetCount: number): UseCompressionCounte
         phase: displayPhase,
         motionPhase: displayPhase,
         poseValid: true,
+        rawPoseValid: true,
+        effectivePoseValid: true,
+        invalidDurationMs: 0,
         reason: "VALID",
         rejectionReason,
         leftElbowAngle,

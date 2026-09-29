@@ -257,6 +257,10 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
           <p>leftElbowAngle: {debug.leftElbowAngle?.toFixed(1) ?? "n/a"}</p>
           <p>rightElbowAngle: {debug.rightElbowAngle?.toFixed(1) ?? "n/a"}</p>
           <p>wristsTogether: {String(debug.wristsTogether)}</p>
+          <p>baseline: {debug.baseline?.toFixed(4) ?? "n/a"}</p>
+          <p>rawPoseValid: {String(debug.rawPoseValid)}</p>
+          <p>effectivePoseValid: {String(debug.effectivePoseValid)}</p>
+          <p>invalidDurationMs: {debug.invalidDurationMs.toFixed(0)}</p>
           <p>poseValid: {String(debug.poseValid)}</p>
           <p>reason: {debug.reason}</p>
           <p>rejectionReason: {debug.rejectionReason}</p>
