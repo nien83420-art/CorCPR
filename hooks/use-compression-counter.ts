@@ -6,92 +6,106 @@ import { POSE_LANDMARK } from "@/lib/pose-connections"
 import { angleAtJoint, distance, minVisibility } from "@/lib/pose-math"
 
 /** Minimum visibility score required on all six arm landmarks before we trust the pose at all. */
-const MIN_VISIBILITY = 0.5
+const MIN_VISIBILITY = 0.45
 /** Max wrist-to-wrist distance, as a multiple of shoulder width, to count as "hands together". */
-const MAX_WRIST_DISTANCE_RATIO = 0.75
-/** Minimum elbow angle (degrees) required to treat the arms as reasonably straight. */
-const MIN_ELBOW_ANGLE_DEG = 150
-/** How far below the shoulder line (normalized by shoulder width) the wrists must sit to count as valid CPR posture. */
-const MIN_HANDS_BELOW_SHOULDERS_RATIO = 0.15
+const MAX_WRIST_DISTANCE_RATIO = 0.85
+/**
+ * Minimum elbow angle (degrees) required to treat an arm as reasonably straight. Lowered from a
+ * stricter value so normal front-camera perspective (which foreshortens the arm and reads a
+ * slightly smaller angle even on genuinely straight arms) doesn't reject real compressions.
+ */
+const MIN_ELBOW_ANGLE_DEG = 130
 
 /**
- * Exponential smoothing factor applied to the motion signal and shoulder line.
- * Higher = more responsive (less lag, so fast 100-120bpm compressions aren't missed),
- * at the cost of passing through a bit more MediaPipe jitter than a heavier filter would.
+ * Exponential smoothing factor applied to the shoulder-line and wrist-line signals. Higher = more
+ * responsive (less lag, so fast 100-120bpm compressions aren't missed), at the cost of passing
+ * through a bit more MediaPipe jitter than a heavier filter would.
  */
 const SMOOTHING_ALPHA = 0.5
 /** Slow adaptation rate for the resting baseline while in READY, so a stable stance can drift without ever "resetting". */
 const BASELINE_ALPHA = 0.08
 /**
- * The motion signal must drop at least this far below baseline (in shoulder widths) to
- * register the start of a downstroke. Larger than RELEASE_RATIO on purpose: this hysteresis
- * gap means jitter sitting near one threshold can't repeatedly flip the state.
+ * How far the shoulder line has to move down from baseline (in shoulder widths) before we treat
+ * it as the *start* of a downstroke. Deliberately small: this only opens the door to a candidate
+ * stroke, it is not the bar for counting one (see MIN_AMPLITUDE_RATIO below). A realistic
+ * front-facing-laptop compression produces a much smaller on-screen shoulder shift than the
+ * physical ~5cm compression depth, so this is intentionally far below the old 0.14 threshold.
  */
-const DOWN_RATIO = 0.14
-/** The motion signal must climb back to within this distance of baseline (in shoulder widths) to register a release. */
-const RELEASE_RATIO = 0.05
+const DOWN_TRIGGER_RATIO = 0.03
 /**
- * Minimum downward travel of the shoulder line itself (in shoulder widths) required during a
- * stroke for it to count as a real CPR compression. Real compressions are driven by the torso
- * pumping down over locked arms, so the shoulder line moves. Purely raising/lowering the wrists
- * in front of the body (shoulders roughly stationary) can produce the same wrist-relative-to-
- * shoulder signal without this shoulder motion, so this guard specifically rejects that case.
+ * Minimum total shoulder-line travel (in shoulder widths) a completed down->up cycle must reach
+ * to be counted as a real compression, rather than sensor noise that briefly crossed the trigger.
  */
-const MIN_SHOULDER_DROP_RATIO = 0.04
+const MIN_AMPLITUDE_RATIO = 0.045
+/** How close back to baseline (in shoulder widths) the shoulder line must return to register a release. */
+const RELEASE_RATIO = 0.015
+/**
+ * Minimum downward wrist travel, as a fraction of the shoulder-line amplitude, required during a
+ * stroke. This is the "wrists move in the same general direction as the shoulders" validation:
+ * it rejects a torso bob/squat where the arms don't participate, while tolerating some slack for
+ * the fact that locked-arm CPR moves the wrists by roughly the same amount as the shoulders, not
+ * necessarily more.
+ */
+const MIN_WRIST_DIRECTION_RATIO = -0.25
 /** Refractory period after a completed compression before another can be counted; filters residual jitter double-counts. */
-const REFRACTORY_MS = 200
+const REFRACTORY_MS = 220
+/**
+ * Grace period (ms) during which a single bad frame - pose temporarily lost, one noisy elbow
+ * reading, a momentary low-confidence landmark - does not cancel an in-progress stroke. Only
+ * *sustained* invalid posture past this window cancels it.
+ */
+const GRACE_MS = 350
 /** How many recent compression intervals to average for BPM. */
-const BPM_WINDOW = 6
+const BPM_WINDOW = 8
 
 export type CompressionStatus = "waiting" | "too-slow" | "good" | "too-fast"
 
 /** READY -> DESCENDING -> BOTTOM -> ASCENDING -> RELEASED (transient, then back to READY). */
 type MotionPhase = "ready" | "descending" | "bottom" | "ascending" | "released"
 
+/** Why the pose is (or was) not currently trustworthy/valid for compression detection. */
 export type PoseInvalidReason =
+  | "VALID"
   | "MISSING_LANDMARKS"
   | "LOW_VISIBILITY"
   | "WRISTS_TOO_FAR"
-  | "ELBOWS_TOO_BENT"
-  | "HANDS_ABOVE_SHOULDERS"
-  | "VALID"
+  | "LEFT_ARM_BENT"
+  | "RIGHT_ARM_BENT"
+  | "BOTH_ARMS_BENT"
 
-/** Debug-facing summary of why a compression is not currently being counted. */
-export type TransitionBlockedBy =
-  | "POSE_INVALID"
-  | "WAITING_FOR_BASELINE"
-  | "INSUFFICIENT_DOWNWARD_TRAVEL"
-  | "INSUFFICIENT_RELEASE_TRAVEL"
-  | "ELBOWS_BENT"
-  | "WRISTS_TOO_FAR"
-  | "LOW_VISIBILITY"
-  | "REFRACTORY_PERIOD"
-  | "WRONG_DIRECTION"
+/** Debug-facing reason a candidate stroke did not (yet) result in a counted compression. */
+export type RejectionReason =
   | "NONE"
+  | "NO_BODY_MOTION"
+  | "AMPLITUDE_TOO_SMALL"
+  | "LEFT_ARM_BENT"
+  | "RIGHT_ARM_BENT"
+  | "BOTH_ARMS_BENT"
+  | "WRISTS_APART"
+  | "POSE_LOST"
+  | "INCOMPLETE_CYCLE"
+  | "REFRACTORY_PERIOD"
 
 interface CompressionDebug {
+  phase: MotionPhase
   poseValid: boolean
+  /** Kept for backwards compatibility with existing debug UI; mirrors `phase`. */
+  motionPhase: MotionPhase
   reason: PoseInvalidReason
+  rejectionReason: RejectionReason
   leftElbowAngle: number | null
   rightElbowAngle: number | null
   wristDistanceRatio: number | null
-  motionPhase: MotionPhase
+  wristsTogether: boolean
+  /** Normalized vertical shoulder-line motion relative to the resting baseline (shoulder widths, positive = moved down). */
+  bodyMotion: number | null
+  /** Kept for backwards compatibility with existing debug UI; mirrors `bodyMotion`'s magnitude while mid-stroke. */
   motionAmplitude: number
-  /** Current smoothed (wristAvgY - shoulderAvgY) / shoulderWidth signal driving the state machine. */
-  motionSignal: number | null
-  /** Absolute signal value that must be crossed (going down) to start a downstroke. */
-  downThreshold: number | null
-  /** Absolute signal value that must be crossed (coming back up) to register a release. */
-  releaseThreshold: number | null
-  /** Resting motion-signal value the state machine is currently measuring strokes against. */
   baseline: number | null
-  /** Shoulder width in landmark units, used to normalize every distance/threshold above. */
-  bodyScale: number | null
-  timeSinceLastCompression: number | null
+  downThreshold: number | null
   leftVisibility: number | null
   rightVisibility: number | null
-  /** Why the current frame is not resulting in a counted compression, for calibration/debugging. */
-  transitionBlockedBy: TransitionBlockedBy
+  timeSinceLastCompression: number | null
 }
 
 interface UseCompressionCounterResult {
@@ -106,22 +120,22 @@ interface UseCompressionCounterResult {
 }
 
 const INITIAL_DEBUG: CompressionDebug = {
+  phase: "ready",
   poseValid: false,
+  motionPhase: "ready",
   reason: "MISSING_LANDMARKS",
+  rejectionReason: "POSE_LOST",
   leftElbowAngle: null,
   rightElbowAngle: null,
   wristDistanceRatio: null,
-  motionPhase: "ready",
+  wristsTogether: false,
+  bodyMotion: null,
   motionAmplitude: 0,
-  motionSignal: null,
-  downThreshold: null,
-  releaseThreshold: null,
   baseline: null,
-  bodyScale: null,
-  timeSinceLastCompression: null,
+  downThreshold: null,
   leftVisibility: null,
   rightVisibility: null,
-  transitionBlockedBy: "NONE",
+  timeSinceLastCompression: null,
 }
 
 export function useCompressionCounter(targetCount: number): UseCompressionCounterResult {
@@ -130,17 +144,22 @@ export function useCompressionCounter(targetCount: number): UseCompressionCounte
   const [status, setStatus] = useState<CompressionStatus>("waiting")
   const [debug, setDebug] = useState<CompressionDebug>(INITIAL_DEBUG)
 
-  // Motion-signal tracking: smoothed (wristAvgY - shoulderAvgY) / shoulderWidth, and the resting
-  // baseline it's compared against. Cleared whenever the pose becomes untrustworthy so a later
-  // reappearance can't be mistaken for a continuation of a stroke.
-  const smoothedSignalRef = useRef<number | null>(null)
+  // Primary signal: smoothed shoulder-line Y, tracked against a slow-moving resting baseline.
+  // Wrist-line Y is tracked alongside it purely for validation (same-direction check), never as
+  // the primary trigger.
   const smoothedShoulderYRef = useRef<number | null>(null)
+  const smoothedWristYRef = useRef<number | null>(null)
   const baselineRef = useRef<number | null>(null)
 
   const phaseRef = useRef<MotionPhase>("ready")
-  const extremeSignalRef = useRef<number | null>(null)
+  const extremeShoulderYRef = useRef<number | null>(null)
   const shoulderYAtStrokeStartRef = useRef<number | null>(null)
-  const shoulderYAtBottomRef = useRef<number | null>(null)
+  const wristYAtStrokeStartRef = useRef<number | null>(null)
+  const wristYAtExtremeRef = useRef<number | null>(null)
+
+  // Grace-period bookkeeping: timestamp the pose *first* became invalid, so a single bad frame
+  // doesn't immediately cancel an in-progress stroke, but sustained invalid posture still does.
+  const invalidSinceRef = useRef<number | null>(null)
 
   const lastCompressionTimeRef = useRef<number | null>(null)
   const intervalsRef = useRef<number[]>([])
@@ -148,13 +167,15 @@ export function useCompressionCounter(targetCount: number): UseCompressionCounte
 
   /** Full reset: clears counters, BPM history, and all motion tracking. */
   const reset = useCallback(() => {
-    smoothedSignalRef.current = null
     smoothedShoulderYRef.current = null
+    smoothedWristYRef.current = null
     baselineRef.current = null
     phaseRef.current = "ready"
-    extremeSignalRef.current = null
+    extremeShoulderYRef.current = null
     shoulderYAtStrokeStartRef.current = null
-    shoulderYAtBottomRef.current = null
+    wristYAtStrokeStartRef.current = null
+    wristYAtExtremeRef.current = null
+    invalidSinceRef.current = null
     lastCompressionTimeRef.current = null
     intervalsRef.current = []
     countRef.current = 0
@@ -165,183 +186,212 @@ export function useCompressionCounter(targetCount: number): UseCompressionCounte
   }, [])
 
   /**
-   * Cancels any in-progress stroke and clears motion tracking (but never touches count/bpm).
-   * Used whenever the pose is missing, low-visibility, or fails CPR-posture requirements, so a
-   * partial downstroke can never complete into a count once the pose becomes invalid again.
+   * Cancels any in-progress stroke and clears stroke-scoped motion tracking (but never touches
+   * count/bpm, and never touches the baseline - a fresh baseline is re-established on the next
+   * valid frame). Used once sustained invalid posture (past the grace period) makes the
+   * in-progress stroke untrustworthy.
    */
   const cancelStroke = () => {
-    smoothedSignalRef.current = null
     smoothedShoulderYRef.current = null
+    smoothedWristYRef.current = null
     baselineRef.current = null
     phaseRef.current = "ready"
-    extremeSignalRef.current = null
+    extremeShoulderYRef.current = null
     shoulderYAtStrokeStartRef.current = null
-    shoulderYAtBottomRef.current = null
+    wristYAtStrokeStartRef.current = null
+    wristYAtExtremeRef.current = null
   }
 
   const update = useCallback(
     (landmarks: PoseKeypoint[] | null) => {
       if (countRef.current >= targetCount) return
 
-      if (!landmarks) {
-        cancelStroke()
-        setDebug({ ...INITIAL_DEBUG, motionPhase: "ready", transitionBlockedBy: "POSE_INVALID" })
-        return
-      }
+      const now = performance.now()
 
-      const leftShoulder = landmarks[POSE_LANDMARK.LEFT_SHOULDER]
-      const rightShoulder = landmarks[POSE_LANDMARK.RIGHT_SHOULDER]
-      const leftElbow = landmarks[POSE_LANDMARK.LEFT_ELBOW]
-      const rightElbow = landmarks[POSE_LANDMARK.RIGHT_ELBOW]
-      const leftWrist = landmarks[POSE_LANDMARK.LEFT_WRIST]
-      const rightWrist = landmarks[POSE_LANDMARK.RIGHT_WRIST]
+      // --- Step 1: figure out whether this frame's pose is trustworthy, and why not if it isn't. ---
+      let poseValid = false
+      let invalidReason: PoseInvalidReason = "MISSING_LANDMARKS"
+      let rejectionForInvalid: RejectionReason = "POSE_LOST"
+      let leftElbowAngle: number | null = null
+      let rightElbowAngle: number | null = null
+      let wristDistanceRatio: number | null = null
+      let wristsTogether = false
+      let leftVisibility: number | null = null
+      let rightVisibility: number | null = null
+      let shoulderAvgY: number | null = null
+      let wristAvgY: number | null = null
+      let bodyScale: number | null = null
 
-      const required = [leftShoulder, rightShoulder, leftElbow, rightElbow, leftWrist, rightWrist]
-      const allPresent = required.every((p) => p && (p.visibility ?? 1) >= MIN_VISIBILITY)
+      if (landmarks) {
+        const leftShoulder = landmarks[POSE_LANDMARK.LEFT_SHOULDER]
+        const rightShoulder = landmarks[POSE_LANDMARK.RIGHT_SHOULDER]
+        const leftElbow = landmarks[POSE_LANDMARK.LEFT_ELBOW]
+        const rightElbow = landmarks[POSE_LANDMARK.RIGHT_ELBOW]
+        const leftWrist = landmarks[POSE_LANDMARK.LEFT_WRIST]
+        const rightWrist = landmarks[POSE_LANDMARK.RIGHT_WRIST]
 
-      const leftVisibility = minVisibility([leftShoulder, leftElbow, leftWrist])
-      const rightVisibility = minVisibility([rightShoulder, rightElbow, rightWrist])
-
-      if (!allPresent) {
-        // Not enough signal to trust the pose. Cancel any in-progress stroke so a partial
-        // reappearance later can't be mistaken for a continuation of it.
-        cancelStroke()
+        const required = [leftShoulder, rightShoulder, leftElbow, rightElbow, leftWrist, rightWrist]
         const anyMissing = required.some((p) => !p)
-        setDebug({
-          ...INITIAL_DEBUG,
-          poseValid: false,
-          reason: anyMissing ? "MISSING_LANDMARKS" : "LOW_VISIBILITY",
-          leftVisibility,
-          rightVisibility,
-          transitionBlockedBy: anyMissing ? "POSE_INVALID" : "LOW_VISIBILITY",
-        })
-        return
+        const allVisible = required.every((p) => p && (p.visibility ?? 1) >= MIN_VISIBILITY)
+
+        leftVisibility = minVisibility([leftShoulder, leftElbow, leftWrist])
+        rightVisibility = minVisibility([rightShoulder, rightElbow, rightWrist])
+
+        if (anyMissing) {
+          invalidReason = "MISSING_LANDMARKS"
+          rejectionForInvalid = "POSE_LOST"
+        } else if (!allVisible) {
+          invalidReason = "LOW_VISIBILITY"
+          rejectionForInvalid = "POSE_LOST"
+        } else {
+          const shoulderWidth = distance(leftShoulder, rightShoulder)
+          if (shoulderWidth <= 0.001) {
+            invalidReason = "MISSING_LANDMARKS"
+            rejectionForInvalid = "POSE_LOST"
+          } else {
+            bodyScale = shoulderWidth
+            wristDistanceRatio = distance(leftWrist, rightWrist) / shoulderWidth
+            wristsTogether = wristDistanceRatio <= MAX_WRIST_DISTANCE_RATIO
+
+            leftElbowAngle = angleAtJoint(leftShoulder, leftElbow, leftWrist)
+            rightElbowAngle = angleAtJoint(rightShoulder, rightElbow, rightWrist)
+            const leftStraight = leftElbowAngle >= MIN_ELBOW_ANGLE_DEG
+            const rightStraight = rightElbowAngle >= MIN_ELBOW_ANGLE_DEG
+
+            shoulderAvgY = (leftShoulder.y + rightShoulder.y) / 2
+            wristAvgY = (leftWrist.y + rightWrist.y) / 2
+
+            if (!wristsTogether) {
+              invalidReason = "WRISTS_TOO_FAR"
+              rejectionForInvalid = "WRISTS_APART"
+            } else if (!leftStraight && !rightStraight) {
+              invalidReason = "BOTH_ARMS_BENT"
+              rejectionForInvalid = "BOTH_ARMS_BENT"
+            } else if (!leftStraight) {
+              invalidReason = "LEFT_ARM_BENT"
+              rejectionForInvalid = "LEFT_ARM_BENT"
+            } else if (!rightStraight) {
+              invalidReason = "RIGHT_ARM_BENT"
+              rejectionForInvalid = "RIGHT_ARM_BENT"
+            } else {
+              poseValid = true
+              invalidReason = "VALID"
+              rejectionForInvalid = "NONE"
+            }
+          }
+        }
       }
 
-      const shoulderWidth = distance(leftShoulder, rightShoulder)
-      if (shoulderWidth <= 0.001) {
-        cancelStroke()
-        setDebug({
-          ...INITIAL_DEBUG,
-          poseValid: false,
-          reason: "MISSING_LANDMARKS",
-          leftVisibility,
-          rightVisibility,
-          transitionBlockedBy: "POSE_INVALID",
-        })
-        return
-      }
-
-      const wristDistance = distance(leftWrist, rightWrist)
-      const wristDistanceRatio = wristDistance / shoulderWidth
-
-      const leftElbowAngle = angleAtJoint(leftShoulder, leftElbow, leftWrist)
-      const rightElbowAngle = angleAtJoint(rightShoulder, rightElbow, rightWrist)
-
-      const shoulderAvgY = (leftShoulder.y + rightShoulder.y) / 2
-      const wristAvgY = (leftWrist.y + rightWrist.y) / 2
-      const handsBelowShoulders = (wristAvgY - shoulderAvgY) / shoulderWidth > MIN_HANDS_BELOW_SHOULDERS_RATIO
-
-      const handsTogether = wristDistanceRatio <= MAX_WRIST_DISTANCE_RATIO
-      const armsStraight = leftElbowAngle >= MIN_ELBOW_ANGLE_DEG && rightElbowAngle >= MIN_ELBOW_ANGLE_DEG
-
-      // Required CPR posture for the *entire* cycle, not just the moment we start counting: both
-      // shoulders/elbows/wrists visible, hands together, arms straight, hands below the shoulder
-      // line. This is also what rejects a plain "raise both hands up in front of the body" motion
-      // once the hands get close to/above shoulder height.
-      const poseValid = handsTogether && armsStraight && handsBelowShoulders
-
+      // --- Step 2: grace period. A single bad frame doesn't cancel an in-progress stroke. ---
       if (!poseValid) {
+        if (invalidSinceRef.current === null) invalidSinceRef.current = now
+        const invalidElapsed = now - invalidSinceRef.current
+
+        if (invalidElapsed <= GRACE_MS && phaseRef.current !== "ready") {
+          // Within grace: freeze the stroke exactly where it was and just report the current
+          // (invalid) frame's diagnostics without advancing or cancelling anything.
+          setDebug({
+            phase: phaseRef.current,
+            motionPhase: phaseRef.current,
+            poseValid: false,
+            reason: invalidReason,
+            rejectionReason: rejectionForInvalid,
+            leftElbowAngle,
+            rightElbowAngle,
+            wristDistanceRatio,
+            wristsTogether,
+            bodyMotion: null,
+            motionAmplitude: 0,
+            baseline: baselineRef.current,
+            downThreshold: baselineRef.current === null ? null : DOWN_TRIGGER_RATIO,
+            leftVisibility,
+            rightVisibility,
+            timeSinceLastCompression: lastCompressionTimeRef.current === null ? null : now - lastCompressionTimeRef.current,
+          })
+          return
+        }
+
+        // Either no stroke was in progress, or the grace period has been exceeded: cancel any
+        // in-progress stroke so a later reappearance can't be mistaken for a continuation of it.
         cancelStroke()
-        const reason: PoseInvalidReason = !handsTogether
-          ? "WRISTS_TOO_FAR"
-          : !armsStraight
-            ? "ELBOWS_TOO_BENT"
-            : "HANDS_ABOVE_SHOULDERS"
-        const transitionBlockedBy: TransitionBlockedBy =
-          reason === "WRISTS_TOO_FAR" ? "WRISTS_TOO_FAR" : reason === "ELBOWS_TOO_BENT" ? "ELBOWS_BENT" : "WRONG_DIRECTION"
         setDebug({
+          phase: "ready",
+          motionPhase: "ready",
           poseValid: false,
-          reason,
+          reason: invalidReason,
+          rejectionReason: rejectionForInvalid,
           leftElbowAngle,
           rightElbowAngle,
           wristDistanceRatio,
-          motionPhase: "ready",
+          wristsTogether,
+          bodyMotion: null,
           motionAmplitude: 0,
-          motionSignal: null,
-          downThreshold: null,
-          releaseThreshold: null,
           baseline: null,
-          bodyScale: shoulderWidth,
-          timeSinceLastCompression: null,
+          downThreshold: null,
           leftVisibility,
           rightVisibility,
-          transitionBlockedBy,
+          timeSinceLastCompression: lastCompressionTimeRef.current === null ? null : now - lastCompressionTimeRef.current,
         })
         return
       }
 
-      // --- Motion signal: relative body geometry, not raw wrist position. ---
-      // Using (wrist - shoulder) instead of wrist alone means whole-body translation relative to
-      // the camera (stepping back, camera shake) mostly cancels out, since both points shift
-      // together. Normalizing by shoulder width makes the thresholds distance-from-camera
-      // invariant.
-      const bodyScale = shoulderWidth
-      const rawSignal = (wristAvgY - shoulderAvgY) / bodyScale
+      // Pose is valid this frame: clear the invalid-since marker.
+      invalidSinceRef.current = null
 
-      const prevSignal = smoothedSignalRef.current
-      const smoothedSignal = prevSignal === null ? rawSignal : prevSignal + SMOOTHING_ALPHA * (rawSignal - prevSignal)
-      smoothedSignalRef.current = smoothedSignal
+      // shoulderAvgY / wristAvgY / bodyScale are guaranteed non-null once poseValid is true.
+      const sAvgY = shoulderAvgY as number
+      const wAvgY = wristAvgY as number
+      const scale = bodyScale as number
 
+      // --- Step 3: smoothing. ---
       const prevShoulderY = smoothedShoulderYRef.current
-      const smoothedShoulderY =
-        prevShoulderY === null ? shoulderAvgY : prevShoulderY + SMOOTHING_ALPHA * (shoulderAvgY - prevShoulderY)
+      const smoothedShoulderY = prevShoulderY === null ? sAvgY : prevShoulderY + SMOOTHING_ALPHA * (sAvgY - prevShoulderY)
       smoothedShoulderYRef.current = smoothedShoulderY
 
-      // True only on the very first valid frame after (re)appearing, before a baseline exists.
+      const prevWristY = smoothedWristYRef.current
+      const smoothedWristY = prevWristY === null ? wAvgY : prevWristY + SMOOTHING_ALPHA * (wAvgY - prevWristY)
+      smoothedWristYRef.current = smoothedWristY
+
       const establishingBaseline = baselineRef.current === null
       if (establishingBaseline) {
-        // Adopt the current signal as the resting baseline immediately, so this frame can't
-        // itself be misread as a downstroke.
-        baselineRef.current = smoothedSignal
+        baselineRef.current = smoothedShoulderY
       }
 
+      // --- Step 4: READY -> DESCENDING -> BOTTOM -> ASCENDING -> RELEASED state machine. ---
       let phase = phaseRef.current
-      // Separate from `phase`: lets the completion frame render as "released" in the debug
-      // overlay even though the persisted phase jumps straight back to "ready" for next frame.
       let displayPhase: MotionPhase = phase
       let motionAmplitude = 0
+      let rejectionReason: RejectionReason = establishingBaseline ? "NO_BODY_MOTION" : "NONE"
       let downThreshold: number
-      let releaseThreshold: number
-      let transitionBlockedBy: TransitionBlockedBy = establishingBaseline ? "WAITING_FOR_BASELINE" : "NONE"
-      const now = performance.now()
 
       if (phase === "ready" || phase === "released") {
         phase = "ready"
         // Slowly track a resting baseline while at rest, so a stable-but-imperfect stance doesn't
-        // need to be pixel-perfect to keep being recognized as "released".
-        baselineRef.current = baselineRef.current + BASELINE_ALPHA * (smoothedSignal - baselineRef.current)
-        downThreshold = baselineRef.current - DOWN_RATIO
-        releaseThreshold = baselineRef.current - RELEASE_RATIO
+        // need to be pixel-perfect to keep being recognized as "at rest".
+        const restingBaseline = baselineRef.current ?? smoothedShoulderY
+        const nextBaseline = restingBaseline + BASELINE_ALPHA * (smoothedShoulderY - restingBaseline)
+        baselineRef.current = nextBaseline
+        downThreshold = DOWN_TRIGGER_RATIO
 
-        if (smoothedSignal < downThreshold) {
+        const bodyMotion = (smoothedShoulderY - nextBaseline) / scale
+        if (bodyMotion > downThreshold) {
           phase = "descending"
-          extremeSignalRef.current = smoothedSignal
-          shoulderYAtStrokeStartRef.current = smoothedShoulderY
-          shoulderYAtBottomRef.current = smoothedShoulderY
+          extremeShoulderYRef.current = smoothedShoulderY
+          shoulderYAtStrokeStartRef.current = nextBaseline
+          wristYAtStrokeStartRef.current = smoothedWristY
+          wristYAtExtremeRef.current = smoothedWristY
+        } else {
+          rejectionReason = "NO_BODY_MOTION"
         }
       } else {
-        // Baseline is frozen for the duration of the stroke so a slow drift mid-stroke can't move
-        // the goalposts on us.
-        const baseline = baselineRef.current
-        downThreshold = baseline - DOWN_RATIO
-        releaseThreshold = baseline - RELEASE_RATIO
-        const extreme = extremeSignalRef.current ?? smoothedSignal
+        const baseline = baselineRef.current ?? smoothedShoulderY
+        downThreshold = DOWN_TRIGGER_RATIO
+        const extreme = extremeShoulderYRef.current ?? smoothedShoulderY
 
         if (phase === "descending") {
-          if (smoothedSignal < extreme) {
-            extremeSignalRef.current = smoothedSignal
-            shoulderYAtBottomRef.current = smoothedShoulderY
+          if (smoothedShoulderY > extreme) {
+            extremeShoulderYRef.current = smoothedShoulderY
+            wristYAtExtremeRef.current = smoothedWristY
             // still sinking, remain in "descending"
           } else {
             phase = "bottom"
@@ -349,31 +399,36 @@ export function useCompressionCounter(targetCount: number): UseCompressionCounte
         }
 
         if (phase === "bottom" || phase === "ascending") {
-          const currentExtreme = extremeSignalRef.current ?? smoothedSignal
-          if (smoothedSignal < currentExtreme) {
+          const currentExtreme = extremeShoulderYRef.current ?? smoothedShoulderY
+          if (smoothedShoulderY > currentExtreme) {
             // noise dipped a bit further after we called the turnaround; keep tracking the true minimum
-            extremeSignalRef.current = smoothedSignal
-            shoulderYAtBottomRef.current = smoothedShoulderY
+            extremeShoulderYRef.current = smoothedShoulderY
+            wristYAtExtremeRef.current = smoothedWristY
             phase = "bottom"
           } else {
-            motionAmplitude = baseline - currentExtreme
-            if (smoothedSignal >= releaseThreshold) {
-              // Back near baseline: a full down-and-up cycle has completed. Before counting it,
-              // require CPR-specific evidence that this was a real compression (torso pump) and
-              // not just the wrists rising/falling with the shoulders staying put.
-              const shoulderDrop =
-                (shoulderYAtBottomRef.current ?? smoothedShoulderY) - (shoulderYAtStrokeStartRef.current ?? smoothedShoulderY)
-              const shoulderDropRatio = shoulderDrop / bodyScale
+            const amplitude = (currentExtreme - baseline) / scale
+            motionAmplitude = amplitude
+            const releasedNow = (smoothedShoulderY - baseline) / scale <= RELEASE_RATIO
+
+            if (releasedNow) {
+              // Back near baseline: a full down-and-up cycle has completed. Validate it before
+              // counting it as a real compression.
+              const wristStart = wristYAtStrokeStartRef.current ?? smoothedWristY
+              const wristExtreme = wristYAtExtremeRef.current ?? smoothedWristY
+              const wristTravel = (wristExtreme - wristStart) / scale
+              // "Wrists move in the same general direction as the shoulders": allow some slack
+              // (locked-arm CPR can move the wrists by roughly the same amount as the shoulders,
+              // not necessarily more) but reject a torso-only bob where the wrists barely move or
+              // move the opposite way.
+              const sameDirection = wristTravel >= amplitude * MIN_WRIST_DIRECTION_RATIO
 
               const lastTime = lastCompressionTimeRef.current
               const withinRefractory = lastTime !== null && now - lastTime < REFRACTORY_MS
-              const sufficientAmplitude = shoulderDropRatio >= MIN_SHOULDER_DROP_RATIO
+              const sufficientAmplitude = amplitude >= MIN_AMPLITUDE_RATIO
 
-              if (sufficientAmplitude && !withinRefractory) {
-                // Displayed as "released" for this frame's debug snapshot; the persisted phase
-                // goes straight back to "ready" so the next cycle starts fresh on the next frame.
+              if (sufficientAmplitude && sameDirection && !withinRefractory) {
                 displayPhase = "released"
-                transitionBlockedBy = "NONE"
+                rejectionReason = "NONE"
                 lastCompressionTimeRef.current = now
                 if (lastTime !== null) {
                   const intervalMs = now - lastTime
@@ -390,20 +445,25 @@ export function useCompressionCounter(targetCount: number): UseCompressionCounte
                 countRef.current += 1
                 setCount(countRef.current)
               } else {
-                transitionBlockedBy = !sufficientAmplitude ? "INSUFFICIENT_DOWNWARD_TRAVEL" : "REFRACTORY_PERIOD"
+                rejectionReason = !sufficientAmplitude
+                  ? "AMPLITUDE_TOO_SMALL"
+                  : withinRefractory
+                    ? "REFRACTORY_PERIOD"
+                    : "INCOMPLETE_CYCLE"
               }
-              // Whether counted or rejected (e.g. hands were raised and lowered with the shoulders
-              // staying still, or still inside the refractory window), the stroke is over: return to
-              // "ready", re-baseline off the current resting signal, and clear stroke-scoped tracking
-              // so the next cycle starts fresh.
+
+              // Whether counted or rejected, the stroke is over: return to "ready", re-baseline
+              // off the current resting signal, and clear stroke-scoped tracking so the next
+              // cycle starts fresh.
               phase = "ready"
-              baselineRef.current = smoothedSignal
-              extremeSignalRef.current = null
+              baselineRef.current = smoothedShoulderY
+              extremeShoulderYRef.current = null
               shoulderYAtStrokeStartRef.current = null
-              shoulderYAtBottomRef.current = null
+              wristYAtStrokeStartRef.current = null
+              wristYAtExtremeRef.current = null
             } else {
               phase = "ascending"
-              transitionBlockedBy = "INSUFFICIENT_RELEASE_TRAVEL"
+              rejectionReason = "NONE"
             }
           }
         }
@@ -412,23 +472,25 @@ export function useCompressionCounter(targetCount: number): UseCompressionCounte
       phaseRef.current = phase
       if (displayPhase !== "released") displayPhase = phase
 
+      const bodyMotionForDisplay = baselineRef.current === null ? null : (smoothedShoulderY - baselineRef.current) / scale
+
       setDebug({
+        phase: displayPhase,
+        motionPhase: displayPhase,
         poseValid: true,
         reason: "VALID",
+        rejectionReason,
         leftElbowAngle,
         rightElbowAngle,
         wristDistanceRatio,
-        motionPhase: displayPhase,
+        wristsTogether,
+        bodyMotion: bodyMotionForDisplay,
         motionAmplitude,
-        motionSignal: smoothedSignal,
-        downThreshold,
-        releaseThreshold,
         baseline: baselineRef.current,
-        bodyScale,
-        timeSinceLastCompression: lastCompressionTimeRef.current === null ? null : now - lastCompressionTimeRef.current,
+        downThreshold,
         leftVisibility,
         rightVisibility,
-        transitionBlockedBy,
+        timeSinceLastCompression: lastCompressionTimeRef.current === null ? null : now - lastCompressionTimeRef.current,
       })
     },
     [targetCount],
