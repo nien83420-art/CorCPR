@@ -87,7 +87,9 @@ function InstructionImage({ alt, placeholder }: { alt: string; placeholder: stri
       src={INSTRUCTION_IMAGE_SRC}
       alt={alt}
       onError={() => setFailed(true)}
-      className="aspect-video w-full rounded-2xl border border-border bg-card object-contain"
+      width={1024}
+      height={600}
+      className="mx-auto h-auto max-h-[45vh] w-full rounded-2xl border border-border bg-white object-contain"
     />
   )
 }
