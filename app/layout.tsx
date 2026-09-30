@@ -3,7 +3,7 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'CPR Hero KZ — Interactive CPR Training',
+  title: 'corCPR — Interactive CPR Training',
   description:
     'Practice life-saving CPR compressions with real-time, on-device pose tracking. Available in Kazakh, Russian, and English.',
   generator: 'v0.app',
