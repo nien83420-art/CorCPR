@@ -9,6 +9,7 @@ import { usePoseLandmarker } from "@/hooks/use-pose-landmarker"
 import { useCallHelpGesture } from "@/hooks/use-call-help-gesture"
 import { useHandPositionValidation } from "@/hooks/use-hand-position-validation"
 import { useCompressionCounter } from "@/hooks/use-compression-counter"
+import { compressionPostureMessage, usePostureVisualState } from "@/hooks/use-posture-visual-state"
 import { cn } from "@/lib/utils"
 import type { Translations } from "@/lib/i18n"
 import type { RatingKey, SessionResult, TrainingStage } from "@/lib/types"
@@ -87,11 +88,22 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
     onComplete: () => setTrainingStage("HAND_POSITION"),
   })
 
-  const { feedbackKey: handPositionFeedback, update: updateHandPosition } = useHandPositionValidation({
+  const {
+    feedbackKey: handPositionFeedback,
+    debug: handPositionDebug,
+    update: updateHandPosition,
+  } = useHandPositionValidation({
     onComplete: () => setTrainingStage("COMPRESSIONS"),
   })
 
   const { count, bpm, status, update, reset, debug } = useCompressionCounter(TARGET_COMPRESSIONS)
+
+  const postureVisualRef = usePostureVisualState({
+    stage: trainingStage,
+    handPositionDebug,
+    compressionDebug: debug,
+  })
+  const compressionPostureFeedback = compressionPostureMessage(debug.reason, debug.effectivePoseValid)
   const startTimeRef = useRef<number>(Date.now())
   const completedRef = useRef(false)
   const latestRef = useRef({ count, bpm })
@@ -194,6 +206,9 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
   } else if (trainingStage === "HAND_POSITION") {
     statusText = handPositionFeedback ? t.training[handPositionFeedback] : t.training.instructionHandPosition
     statusColor = handPositionFeedback ? "bg-amber-500 text-white" : "bg-muted text-muted-foreground"
+  } else if (compressionPostureFeedback) {
+    statusText = t.training[compressionPostureFeedback]
+    statusColor = "bg-red-600 text-white"
   }
 
   return (
@@ -223,6 +238,7 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
           <PoseOverlayCanvas
             videoRef={videoRef}
             poseRef={poseRef}
+            visualRef={postureVisualRef}
             connections={connections}
             className="absolute inset-0 size-full"
           />

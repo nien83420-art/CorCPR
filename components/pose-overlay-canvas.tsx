@@ -4,18 +4,62 @@ import { useEffect, useRef } from "react"
 import type { PoseKeypoint } from "@/lib/types"
 import { ARM_JOINT_INDICES, POSE_LANDMARK, type PoseConnection } from "@/lib/pose-connections"
 import { MIN_LANDMARK_VISIBILITY } from "@/lib/pose-stabilizer"
+import { NEUTRAL_VISUAL_STATE, type PostureVisualState, type SegmentState } from "@/lib/posture-visual"
 
 interface PoseOverlayCanvasProps {
   videoRef: React.RefObject<HTMLVideoElement | null>
   poseRef: React.RefObject<PoseKeypoint[] | null>
+  /** Semantic per-segment colors, read every animation frame. */
+  visualRef?: React.RefObject<PostureVisualState>
   /** PoseLandmarker.POSE_CONNECTIONS */
   connections: PoseConnection[]
   className?: string
 }
 
-const LINE_COLOR = "rgba(34, 197, 94, 0.9)"
-const JOINT_COLOR = "rgba(239, 68, 68, 0.95)"
+const SEGMENT_COLOR: Record<SegmentState, string> = {
+  valid: "rgba(34, 197, 94, 0.95)",
+  invalid: "rgba(239, 68, 68, 0.95)",
+  neutral: "rgba(255, 255, 255, 0.7)",
+}
 const JOINT_OUTLINE = "rgba(255, 255, 255, 0.95)"
+
+const L = POSE_LANDMARK
+const LEFT_HAND = new Set([L.LEFT_WRIST, 17, 19, 21])
+const RIGHT_HAND = new Set([L.RIGHT_WRIST, 18, 20, 22])
+
+/**
+ * Landmark indices are MediaPipe's anatomical left/right — the same indices the validators use.
+ * The canvas shares the video's scaleX(-1), so coloring a landmark colors exactly the arm the
+ * user sees on screen; no extra left/right swap is needed.
+ */
+function jointState(index: number, v: PostureVisualState): SegmentState {
+  if (index === L.LEFT_SHOULDER) return v.leftShoulder !== "neutral" ? v.leftShoulder : v.leftArm
+  if (index === L.RIGHT_SHOULDER) return v.rightShoulder !== "neutral" ? v.rightShoulder : v.rightArm
+  if (index === L.LEFT_ELBOW) return v.leftArm
+  if (index === L.RIGHT_ELBOW) return v.rightArm
+  if (index === L.LEFT_WRIST) return v.leftWrist !== "neutral" ? v.leftWrist : v.leftArm
+  if (index === L.RIGHT_WRIST) return v.rightWrist !== "neutral" ? v.rightWrist : v.rightArm
+  if (LEFT_HAND.has(index)) return v.leftWrist
+  if (RIGHT_HAND.has(index)) return v.rightWrist
+  return "neutral"
+}
+
+function isPair(start: number, end: number, a: number, b: number) {
+  return (start === a && end === b) || (start === b && end === a)
+}
+
+function connectionState(start: number, end: number, v: PostureVisualState): SegmentState {
+  if (isPair(start, end, L.LEFT_SHOULDER, L.LEFT_ELBOW) || isPair(start, end, L.LEFT_ELBOW, L.LEFT_WRIST)) return v.leftArm
+  if (isPair(start, end, L.RIGHT_SHOULDER, L.RIGHT_ELBOW) || isPair(start, end, L.RIGHT_ELBOW, L.RIGHT_WRIST)) return v.rightArm
+  if (isPair(start, end, L.LEFT_SHOULDER, L.RIGHT_SHOULDER)) {
+    if (v.leftShoulder === "invalid" || v.rightShoulder === "invalid") return "invalid"
+    if (v.leftShoulder === "valid" && v.rightShoulder === "valid") return "valid"
+    return "neutral"
+  }
+  if (LEFT_HAND.has(start) && LEFT_HAND.has(end)) return v.leftWrist
+  if (RIGHT_HAND.has(start) && RIGHT_HAND.has(end)) return v.rightWrist
+  return "neutral"
+}
 const LINE_WIDTH = 3
 const ARM_LINE_WIDTH = 4
 const JOINT_RADIUS = 3
@@ -38,7 +82,7 @@ function isTracked(p: PoseKeypoint | undefined): p is PoseKeypoint {
  * mirroring), so points are drawn in un-mirrored video space and the CSS
  * transform mirrors both identically.
  */
-export function PoseOverlayCanvas({ videoRef, poseRef, connections, className }: PoseOverlayCanvasProps) {
+export function PoseOverlayCanvas({ videoRef, poseRef, visualRef, connections, className }: PoseOverlayCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const connectionsRef = useRef(connections)
   connectionsRef.current = connections
@@ -53,6 +97,7 @@ export function PoseOverlayCanvas({ videoRef, poseRef, connections, className }:
     let cssHeight = 0
     let dirty = true
     let lastPose: PoseKeypoint[] | null | undefined
+    let lastVisual: PostureVisualState | undefined
     let rafId = 0
 
     const syncSize = () => {
@@ -83,7 +128,7 @@ export function PoseOverlayCanvas({ videoRef, poseRef, connections, className }:
     video?.addEventListener("loadedmetadata", markDirty)
     video?.addEventListener("resize", markDirty)
 
-    const draw = (pose: PoseKeypoint[] | null) => {
+    const draw = (pose: PoseKeypoint[] | null, visual: PostureVisualState) => {
       ctx.clearRect(0, 0, cssWidth, cssHeight)
       const v = videoRef.current
       if (!pose || !v || !v.videoWidth || !v.videoHeight || !cssWidth || !cssHeight) return
@@ -112,7 +157,6 @@ export function PoseOverlayCanvas({ videoRef, poseRef, connections, className }:
       const maxSegment = bodyScale > 0 ? bodyScale * MAX_SEGMENT_BODY_SCALE : Math.max(drawnWidth, drawnHeight) * 0.5
 
       ctx.lineCap = "round"
-      ctx.strokeStyle = LINE_COLOR
       for (const { start, end } of connectionsRef.current) {
         const a = pose[start]
         const b = pose[end]
@@ -123,6 +167,7 @@ export function PoseOverlayCanvas({ videoRef, poseRef, connections, className }:
         const by = py(b)
         if (Math.hypot(ax - bx, ay - by) > maxSegment) continue
         ctx.lineWidth = ARM_JOINTS.has(start) && ARM_JOINTS.has(end) ? ARM_LINE_WIDTH : LINE_WIDTH
+        ctx.strokeStyle = SEGMENT_COLOR[connectionState(start, end, visual)]
         ctx.beginPath()
         ctx.moveTo(ax, ay)
         ctx.lineTo(bx, by)
@@ -135,22 +180,23 @@ export function PoseOverlayCanvas({ videoRef, poseRef, connections, className }:
         const emphasized = ARM_JOINTS.has(i)
         ctx.beginPath()
         ctx.arc(px(p), py(p), emphasized ? ARM_JOINT_RADIUS : JOINT_RADIUS, 0, Math.PI * 2)
-        ctx.fillStyle = JOINT_COLOR
+        ctx.fillStyle = SEGMENT_COLOR[jointState(i, visual)]
         ctx.fill()
         if (emphasized) {
           ctx.lineWidth = 2
           ctx.strokeStyle = JOINT_OUTLINE
           ctx.stroke()
-          ctx.strokeStyle = LINE_COLOR
         }
       }
     }
 
     const loop = () => {
       const pose = poseRef.current
-      if (dirty || pose !== lastPose) {
-        draw(pose)
+      const visual = visualRef?.current ?? NEUTRAL_VISUAL_STATE
+      if (dirty || pose !== lastPose || visual !== lastVisual) {
+        draw(pose, visual)
         lastPose = pose
+        lastVisual = visual
         dirty = false
       }
       rafId = requestAnimationFrame(loop)
@@ -163,7 +209,7 @@ export function PoseOverlayCanvas({ videoRef, poseRef, connections, className }:
       video?.removeEventListener("loadedmetadata", markDirty)
       video?.removeEventListener("resize", markDirty)
     }
-  }, [videoRef, poseRef])
+  }, [videoRef, poseRef, visualRef])
 
   return <canvas ref={canvasRef} className={className} aria-hidden="true" />
 }
