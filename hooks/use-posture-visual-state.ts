@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react"
 import type { TrainingStage } from "@/lib/types"
 import type { HandPositionReason } from "@/hooks/use-hand-position-validation"
 import type { PoseInvalidReason } from "@/hooks/use-compression-counter"
+import type { CallHelpSide } from "@/hooks/use-call-help-gesture"
 import { POSE_HOLD_MS } from "@/lib/pose-stabilizer"
 import {
   NEUTRAL_VISUAL_STATE,
@@ -108,6 +109,8 @@ interface UsePostureVisualStateOptions {
   handPositionDebug: { reason: HandPositionReason }
   /** The compression counter's debug snapshot (a new object every processed frame). */
   compressionDebug: { reason: PoseInvalidReason; rawPoseValid: boolean; effectivePoseValid: boolean }
+  /** Which hand the CALL_HELP detector currently accepts as the phone hand. */
+  callHelpSide?: CallHelpSide
 }
 
 /**
@@ -115,14 +118,21 @@ interface UsePostureVisualStateOptions {
  * colors, exposed as a ref so the canvas rAF loop always reads the latest value without React
  * re-rendering it. No thresholds live here; only the validators' own verdicts are used.
  */
-export function usePostureVisualState({ stage, handPositionDebug, compressionDebug }: UsePostureVisualStateOptions) {
+export function usePostureVisualState({ stage, handPositionDebug, compressionDebug, callHelpSide }: UsePostureVisualStateOptions) {
   const visualRef = useRef<PostureVisualState>(NEUTRAL_VISUAL_STATE)
   const pendingRef = useRef<{ state: PostureVisualState; since: number } | null>(null)
 
   useEffect(() => {
     if (stage === "CALL_HELP") {
+      // The CALL_HELP detector already applies its own hold/dropout timing, so no extra debounce.
       pendingRef.current = null
-      visualRef.current = NEUTRAL_VISUAL_STATE
+      const side = callHelpSide ?? null
+      visualRef.current =
+        side === "left"
+          ? { ...NEUTRAL_VISUAL_STATE, leftArm: "valid", leftWrist: "valid" }
+          : side === "right"
+            ? { ...NEUTRAL_VISUAL_STATE, rightArm: "valid", rightWrist: "valid" }
+            : NEUTRAL_VISUAL_STATE
       return
     }
 
@@ -162,7 +172,7 @@ export function usePostureVisualState({ stage, handPositionDebug, compressionDeb
       pendingRef.current = null
       visualRef.current = next
     }
-  }, [stage, handPositionDebug, compressionDebug])
+  }, [stage, handPositionDebug, compressionDebug, callHelpSide])
 
   return visualRef
 }

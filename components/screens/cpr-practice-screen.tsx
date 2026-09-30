@@ -11,11 +11,15 @@ import { useHandPositionValidation } from "@/hooks/use-hand-position-validation"
 import { useCompressionCounter } from "@/hooks/use-compression-counter"
 import { compressionPostureMessage, usePostureVisualState } from "@/hooks/use-posture-visual-state"
 import { type MovementFeedbackKey, useCompressionMovementFeedback } from "@/hooks/use-compression-movement-feedback"
+import { useSessionStats } from "@/hooks/use-session-stats"
+import { computeSessionScores } from "@/lib/session-scoring"
 import { cn } from "@/lib/utils"
 import type { Translations } from "@/lib/i18n"
-import type { RatingKey, SessionResult, TrainingStage } from "@/lib/types"
+import type { SessionResult, TrainingStage } from "@/lib/types"
 
 const TARGET_COMPRESSIONS = 30
+/** Developer diagnostics overlays stay in the code but never render for learners unless explicitly enabled. */
+const SHOW_DEBUG_PANELS = process.env.NEXT_PUBLIC_CPR_DEBUG === "1"
 
 const MOVEMENT_FEEDBACK_COLOR: Record<MovementFeedbackKey, string> = {
   releaseFully: "bg-amber-500 text-white",
@@ -30,13 +34,6 @@ const MOVEMENT_FEEDBACK_COLOR: Record<MovementFeedbackKey, string> = {
 interface CprPracticeScreenProps {
   t: Translations
   onComplete: (result: SessionResult) => void
-}
-
-function rateResult(totalCompressions: number, averageBpm: number): RatingKey {
-  if (totalCompressions === 0) return "needsWork"
-  if (averageBpm >= 100 && averageBpm <= 120) return "excellent"
-  if (averageBpm >= 90 && averageBpm <= 130) return "good"
-  return "needsWork"
 }
 
 export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
@@ -95,7 +92,11 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
 
   const [trainingStage, setTrainingStage] = useState<TrainingStage>("CALL_HELP")
 
-  const { feedbackKey: callHelpFeedback, update: updateCallHelp } = useCallHelpGesture({
+  const {
+    feedbackKey: callHelpFeedback,
+    debug: callHelpDebug,
+    update: updateCallHelp,
+  } = useCallHelpGesture({
     onComplete: () => setTrainingStage("HAND_POSITION"),
   })
 
@@ -113,6 +114,7 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
     stage: trainingStage,
     handPositionDebug,
     compressionDebug: debug,
+    callHelpSide: callHelpDebug.activeSide,
   })
   const compressionPostureFeedback = compressionPostureMessage(debug.reason, debug.effectivePoseValid)
   const movementFeedback = useCompressionMovementFeedback({
@@ -120,6 +122,12 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
     debug,
     count,
     status,
+  })
+  const { getStats, resetStats } = useSessionStats({
+    active: trainingStage === "COMPRESSIONS",
+    debug,
+    count,
+    movementFeedback,
   })
   const startTimeRef = useRef<number>(Date.now())
   const completedRef = useRef(false)
@@ -129,7 +137,8 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
   useEffect(() => {
     if (trainingStage !== "COMPRESSIONS") return
     reset()
-  }, [trainingStage, reset])
+    resetStats()
+  }, [trainingStage, reset, resetStats])
 
   useEffect(() => {
     if (trainingStage === "CALL_HELP") {
@@ -153,11 +162,12 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
     const durationSeconds = Math.max(1, Math.round((Date.now() - startTimeRef.current) / 1000))
     onComplete({
       totalCompressions: finalCount,
+      targetCompressions: TARGET_COMPRESSIONS,
       averageBpm,
       durationSeconds,
-      rating: rateResult(finalCount, averageBpm),
+      ...computeSessionScores(getStats(), finalCount, TARGET_COMPRESSIONS),
     })
-  }, [onComplete])
+  }, [onComplete, getStats])
 
   useEffect(() => {
     if (count >= TARGET_COMPRESSIONS) {
@@ -268,6 +278,9 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
           <div className={cn("rounded-full px-4 py-1.5 text-sm font-semibold shadow", statusColor)}>{statusText}</div>
         </div>
 
+        {/* Developer diagnostics: hidden from learners. Set NEXT_PUBLIC_CPR_DEBUG=1 to show them. */}
+        {SHOW_DEBUG_PANELS && (
+        <>
         {/* TEMPORARY: camera diagnostics panel for debugging the Safari black-video issue. Remove after root cause is found. */}
         <div className="pointer-events-none absolute bottom-2 left-2 right-2 rounded-lg bg-black/80 p-2 font-mono text-[10px] leading-tight text-lime-300">
           <p>camera status: {cameraStatus}</p>
@@ -301,6 +314,8 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
           <p>reason: {debug.reason}</p>
           <p>rejectionReason: {debug.rejectionReason}</p>
         </div>
+        </>
+        )}
       </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3">

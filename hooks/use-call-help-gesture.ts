@@ -7,16 +7,39 @@ import { distance } from "@/lib/pose-math"
 
 /** Minimum visibility score required on the landmarks we read before trusting the pose at all. */
 const MIN_VISIBILITY = 0.5
-/** Max wrist-to-ear distance, as a multiple of shoulder width, to count as "phone to ear". */
-const MAX_EAR_WRIST_RATIO = 0.45
-/** How long the gesture must be held continuously before the stage completes. */
-const HOLD_DURATION_MS = 1000
+/**
+ * Max wrist-to-ear distance, as a multiple of shoulder width, to count as "phone to ear".
+ * Previously 0.45, which effectively required the fist to touch the ear (the wrist sits a hand's
+ * length below the ear in a natural phone pose).
+ */
+const MAX_EAR_WRIST_RATIO = 0.6
+/**
+ * The wrist must also be above its shoulder and no higher than slightly above the ear, so a hand
+ * raised over the head or waved in front of the chest cannot pass just by being within range.
+ * Expressed as a multiple of shoulder width above the ear (negative y is up in image space).
+ */
+const MAX_WRIST_ABOVE_EAR_RATIO = 0.25
+/** Wrist must be at least this fraction of the nose-to-ear horizontal offset out to the side of the face. */
+const MIN_SIDE_OFFSET_FRACTION = 0.5
+/** MediaPipe Pose landmark index for the nose. */
+const NOSE_INDEX = 0
+/** How long the gesture must be held continuously before the stage completes (previously 1000 ms). */
+const HOLD_DURATION_MS = 700
+/**
+ * A brief tracking dropout inside a hold doesn't restart the timer; anything longer does. Well
+ * below the hold duration, so a single accidental frame can never complete the stage.
+ */
+const HOLD_DROPOUT_GRACE_MS = 150
 
 export type CallHelpFeedback = "getCloser" | "holdLonger" | null
+
+export type CallHelpSide = "left" | "right" | null
 
 interface CallHelpDebug {
   /** Smaller of the left/right wrist-to-ear distances (shoulder-width normalized), or null if untrackable. */
   wristEarDistance: number | null
+  /** Which hand currently satisfies the phone gesture, used to color that wrist green. */
+  activeSide: CallHelpSide
   /** Milliseconds the gesture has been held continuously in the current attempt, clamped to HOLD_DURATION_MS. */
   holdTime: number
 }
@@ -35,7 +58,7 @@ interface UseCallHelpGestureResult {
   reset: () => void
 }
 
-const INITIAL_DEBUG: CallHelpDebug = { wristEarDistance: null, holdTime: 0 }
+const INITIAL_DEBUG: CallHelpDebug = { wristEarDistance: null, activeSide: null, holdTime: 0 }
 
 /**
  * Detects a "phone to ear" gesture: either wrist held near its corresponding ear continuously
@@ -48,12 +71,14 @@ export function useCallHelpGesture({ onComplete }: UseCallHelpGestureOptions): U
   const [debug, setDebug] = useState<CallHelpDebug>(INITIAL_DEBUG)
 
   const holdStartRef = useRef<number | null>(null)
+  const lastCloseRef = useRef<number | null>(null)
   const completedRef = useRef(false)
   const onCompleteRef = useRef(onComplete)
   onCompleteRef.current = onComplete
 
   const reset = useCallback(() => {
     holdStartRef.current = null
+    lastCloseRef.current = null
     completedRef.current = false
     setCompleted(false)
     setFeedbackKey(null)
@@ -108,26 +133,58 @@ export function useCallHelpGesture({ onComplete }: UseCallHelpGestureOptions): U
     const ratios = [leftRatio, rightRatio].filter((r): r is number => r !== null)
     const wristEarDistance = ratios.length > 0 ? Math.min(...ratios) : null
 
-    const isClose = (leftRatio !== null && leftRatio <= MAX_EAR_WRIST_RATIO) || (rightRatio !== null && rightRatio <= MAX_EAR_WRIST_RATIO)
+    const isPhonePose = (
+      ratio: number | null,
+      wrist: PoseKeypoint | undefined,
+      ear: PoseKeypoint | undefined,
+      shoulder: PoseKeypoint,
+    ) =>
+      ratio !== null &&
+      !!wrist &&
+      !!ear &&
+      ratio <= MAX_EAR_WRIST_RATIO &&
+      wrist.y < shoulder.y &&
+      ear.y - wrist.y <= MAX_WRIST_ABOVE_EAR_RATIO * shoulderWidth &&
+      isBesideHead(wrist, ear)
+
+    const nose = landmarks[NOSE_INDEX]
+    const noseVisible = !!nose && (nose.visibility ?? 1) >= MIN_VISIBILITY
+    // The wrist must sit on the ear's side of the face (not in front of the mouth/chin).
+    const isBesideHead = (wrist: PoseKeypoint, ear: PoseKeypoint) => {
+      if (!noseVisible) return true
+      const earOffset = ear.x - nose.x
+      const wristOffset = wrist.x - nose.x
+      return Math.sign(wristOffset) === Math.sign(earOffset) && Math.abs(wristOffset) >= MIN_SIDE_OFFSET_FRACTION * Math.abs(earOffset)
+    }
+
+    const leftClose = isPhonePose(leftRatio, leftWrist, leftEar, leftShoulder)
+    const rightClose = isPhonePose(rightRatio, rightWrist, rightEar, rightShoulder)
+    const activeSide: CallHelpSide =
+      leftClose && rightClose ? ((leftRatio ?? 1) <= (rightRatio ?? 1) ? "left" : "right") : leftClose ? "left" : rightClose ? "right" : null
 
     const now = performance.now()
 
-    if (isClose) {
+    if (activeSide) {
+      lastCloseRef.current = now
       if (holdStartRef.current === null) holdStartRef.current = now
       const holdTime = Math.min(HOLD_DURATION_MS, now - holdStartRef.current)
       setFeedbackKey(null)
-      setDebug({ wristEarDistance, holdTime })
+      setDebug({ wristEarDistance, activeSide, holdTime })
 
       if (now - holdStartRef.current >= HOLD_DURATION_MS) {
         completedRef.current = true
         setCompleted(true)
         onCompleteRef.current()
       }
+    } else if (holdStartRef.current !== null && lastCloseRef.current !== null && now - lastCloseRef.current <= HOLD_DROPOUT_GRACE_MS) {
+      // Brief dropout inside a hold: keep the timer and the green wrist, but don't complete on it.
+      setDebug((prev) => ({ ...prev, wristEarDistance }))
     } else {
       const wasHolding = holdStartRef.current !== null
       holdStartRef.current = null
+      lastCloseRef.current = null
       setFeedbackKey(wasHolding ? "holdLonger" : "getCloser")
-      setDebug({ wristEarDistance, holdTime: 0 })
+      setDebug({ wristEarDistance, activeSide: null, holdTime: 0 })
     }
   }, [])
 
