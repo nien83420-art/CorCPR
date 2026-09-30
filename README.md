@@ -124,4 +124,3 @@ pnpm dev
 2. Тойбай Әмина
 3. Актан Сымбат
 4. Серикбаева Сафия
- а рекомендациях [https://www.redcross.org/get-help/how-to-prepare-for-emergencies/hands-only-cpr.html /https://www.erc.edu/media/wrhj5sye/gl2025-04-bls-e.pdf? / Красный Крест — укажите, на что реально опирались].
