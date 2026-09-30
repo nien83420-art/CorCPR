@@ -8,9 +8,9 @@ export const LANGUAGES: { code: Language; label: string; native: string }[] = [
 
 export const translations = {
   kk: {
-    appName: "CPR Hero KZ",
+    appName: "corCPR",
     welcome: {
-      title: "CPR Hero KZ",
+      title: "corCPR",
       subtitle: "Жүрек-өкпе реанимациясын үйрену үшін интерактивті жаттығу",
       start: "Бастау",
       disclaimer: "Бұл тек оқыту құралы, нақты медициналық көмекті алмастырмайды",
@@ -95,7 +95,7 @@ export const translations = {
       rhythmValue: "Минутына 100–120 басу",
       safetyTitle: "Маңызды",
       safetyBody:
-        "Қолданба веб-камера арқылы дененің көрінетін қалпы мен қимылын бағалайды. Ол басу күшін немесе нақты тереңдігін (сантиметрмен) өлшей алмайды. CPR Hero — жаттығуға арналған көмекші құрал, ол сертификатталған алғашқы көмек курсын алмастырмайды.",
+        "Қолданба веб-камера арқылы дененің көрінетін қалпы мен қимылын бағалайды. Ол басу күшін немесе нақты тереңдігін (сантиметрмен) өлшей алмайды. corCPR — жаттығуға арналған көмекші құрал, ол сертификатталған алғашқы көмек курсын алмастырмайды.",
       start: "Жаттығуды бастау",
     },
     training: {
@@ -124,9 +124,9 @@ export const translations = {
     },
   },
   ru: {
-    appName: "CPR Hero KZ",
+    appName: "corCPR",
     welcome: {
-      title: "CPR Hero KZ",
+      title: "corCPR",
       subtitle: "Интерактивная тренировка сердечно-легочной реанимации",
       start: "Начать",
       disclaimer: "Это только обучающий инструмент, не заменяет реальную медицинскую помощь",
@@ -211,7 +211,7 @@ export const translations = {
       rhythmValue: "100–120 нажатий в минуту",
       safetyTitle: "Важно",
       safetyBody:
-        "Приложение оценивает видимое положение тела и движения через веб-камеру. Оно не может измерить реальную силу нажатия или точную глубину в сантиметрах. CPR Hero — тренировочное пособие и не заменяет сертифицированное обучение СЛР / первой помощи.",
+        "Приложение оценивает видимое положение тела и движения через веб-камеру. Оно не может измерить реальную силу нажатия или точную глубину в сантиметрах. corCPR — тренировочное пособие и не заменяет сертифицированное обучение СЛР / первой помощи.",
       start: "Начать тренировку",
     },
     training: {
@@ -240,9 +240,9 @@ export const translations = {
     },
   },
   en: {
-    appName: "CPR Hero KZ",
+    appName: "corCPR",
     welcome: {
-      title: "CPR Hero KZ",
+      title: "corCPR",
       subtitle: "Interactive CPR training to help you save lives",
       start: "Start Training",
       disclaimer: "This is a training tool only and does not replace real medical care",
@@ -327,7 +327,7 @@ export const translations = {
       rhythmValue: "100–120 compressions per minute",
       safetyTitle: "Important",
       safetyBody:
-        "The app evaluates your visible body position and movement through the webcam. It cannot measure actual compression force or exact depth in centimeters. CPR Hero is a training aid and does not replace certified CPR / first-aid training.",
+        "The app evaluates your visible body position and movement through the webcam. It cannot measure actual compression force or exact depth in centimeters. corCPR is a training aid and does not replace certified CPR / first-aid training.",
       start: "Start training",
     },
     training: {
