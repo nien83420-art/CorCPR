@@ -31,7 +31,7 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
   const { videoRef, videoCallbackRef, status: cameraStatus, errorMessage, retry } = useCamera({ active: true })
   const cameraReady = cameraStatus === "granted"
 
-  const { landmarks, personDetected, isModelLoading, error: modelError } = usePoseLandmarker({
+  const { landmarks, poseRef, connections, personDetected, isModelLoading, error: modelError } = usePoseLandmarker({
     videoRef,
     active: cameraReady,
   })
@@ -220,7 +220,12 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
             muted
             className="size-full object-cover"
           />
-          <PoseOverlayCanvas videoRef={videoRef} landmarks={landmarks} className="absolute inset-0 size-full" />
+          <PoseOverlayCanvas
+            videoRef={videoRef}
+            poseRef={poseRef}
+            connections={connections}
+            className="absolute inset-0 size-full"
+          />
         </div>
 
         <div className="pointer-events-none absolute inset-x-0 top-0 flex justify-center p-3">
@@ -244,17 +249,21 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
         {/* TEMPORARY: CPR compression-counter diagnostics panel. Diagnostics only — no thresholds or counting logic changed. Remove after debugging is complete. */}
         <div className="pointer-events-none absolute left-2 top-12 rounded-lg bg-black/80 p-2 font-mono text-[10px] leading-tight text-cyan-300">
           <p>trainingStage: {trainingStage}</p>
-          <p>poseValid: {String(debug.poseValid)}</p>
-          <p>reason: {debug.reason}</p>
-          <p>leftElbowAngle: {debug.leftElbowAngle?.toFixed(1) ?? "n/a"}</p>
-          <p>rightElbowAngle: {debug.rightElbowAngle?.toFixed(1) ?? "n/a"}</p>
-          <p>wristDistanceRatio: {debug.wristDistanceRatio?.toFixed(3) ?? "n/a"}</p>
-          <p>motionPhase: {debug.motionPhase}</p>
-          <p>motionAmplitude: {debug.motionAmplitude.toFixed(4)}</p>
-          <p>leftVisibility: {debug.leftVisibility?.toFixed(2) ?? "n/a"}</p>
-          <p>rightVisibility: {debug.rightVisibility?.toFixed(2) ?? "n/a"}</p>
+          <p>phase: {debug.phase}</p>
           <p>count: {count}</p>
           <p>bpm: {bpm ?? "n/a"}</p>
+          <p>bodyMotion: {debug.bodyMotion?.toFixed(4) ?? "n/a"}</p>
+          <p>motionAmplitude: {debug.motionAmplitude.toFixed(4)}</p>
+          <p>leftElbowAngle: {debug.leftElbowAngle?.toFixed(1) ?? "n/a"}</p>
+          <p>rightElbowAngle: {debug.rightElbowAngle?.toFixed(1) ?? "n/a"}</p>
+          <p>wristsTogether: {String(debug.wristsTogether)}</p>
+          <p>baseline: {debug.baseline?.toFixed(4) ?? "n/a"}</p>
+          <p>rawPoseValid: {String(debug.rawPoseValid)}</p>
+          <p>effectivePoseValid: {String(debug.effectivePoseValid)}</p>
+          <p>invalidDurationMs: {debug.invalidDurationMs.toFixed(0)}</p>
+          <p>poseValid: {String(debug.poseValid)}</p>
+          <p>reason: {debug.reason}</p>
+          <p>rejectionReason: {debug.rejectionReason}</p>
         </div>
       </div>
 

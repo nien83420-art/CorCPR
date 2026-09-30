@@ -16,8 +16,21 @@ const MIN_ALIGNMENT_RATIO = 0.1
 /** How long the correct posture must be held continuously before the stage completes. */
 const STABLE_DURATION_MS = 600
 
-export type HandPositionReason = "MISSING_LANDMARKS" | "ELBOWS_BENT" | "WRISTS_TOO_FAR" | "SHOULDER_ALIGNMENT" | "VALID"
-export type HandPositionFeedback = "straightenElbows" | "bringWristsTogether" | "shouldersOverHands" | null
+export type HandPositionReason =
+  | "MISSING_LANDMARKS"
+  | "LEFT_ELBOW_BENT"
+  | "RIGHT_ELBOW_BENT"
+  | "BOTH_ELBOWS_BENT"
+  | "WRISTS_TOO_FAR"
+  | "SHOULDER_ALIGNMENT"
+  | "VALID"
+export type HandPositionFeedback =
+  | "straightenLeftElbow"
+  | "straightenRightElbow"
+  | "straightenElbows"
+  | "bringWristsTogether"
+  | "shouldersOverHands"
+  | null
 
 interface HandPositionDebug {
   leftElbowAngle: number | null
@@ -54,7 +67,11 @@ const INITIAL_DEBUG: HandPositionDebug = {
 
 function reasonToFeedback(reason: HandPositionReason): HandPositionFeedback {
   switch (reason) {
-    case "ELBOWS_BENT":
+    case "LEFT_ELBOW_BENT":
+      return "straightenLeftElbow"
+    case "RIGHT_ELBOW_BENT":
+      return "straightenRightElbow"
+    case "BOTH_ELBOWS_BENT":
       return "straightenElbows"
     case "WRISTS_TOO_FAR":
       return "bringWristsTogether"
@@ -131,14 +148,23 @@ export function useHandPositionValidation({ onComplete }: UseHandPositionValidat
     const wristAvgY = (leftWrist.y + rightWrist.y) / 2
     const shoulderHandAlignment = (wristAvgY - shoulderAvgY) / shoulderWidth
 
-    const armsStraight = leftElbowAngle >= MIN_ELBOW_ANGLE_DEG && rightElbowAngle >= MIN_ELBOW_ANGLE_DEG
+    const leftStraight = leftElbowAngle >= MIN_ELBOW_ANGLE_DEG
+    const rightStraight = rightElbowAngle >= MIN_ELBOW_ANGLE_DEG
     const handsTogether = wristDistanceRatio <= MAX_WRIST_DISTANCE_RATIO
     const alignmentOk = shoulderHandAlignment > MIN_ALIGNMENT_RATIO
 
     const debugFields = { leftElbowAngle, rightElbowAngle, wristDistanceRatio, shoulderHandAlignment }
 
-    if (!armsStraight) {
-      fail("ELBOWS_BENT", debugFields)
+    if (!leftStraight && !rightStraight) {
+      fail("BOTH_ELBOWS_BENT", debugFields)
+      return
+    }
+    if (!leftStraight) {
+      fail("LEFT_ELBOW_BENT", debugFields)
+      return
+    }
+    if (!rightStraight) {
+      fail("RIGHT_ELBOW_BENT", debugFields)
       return
     }
     if (!handsTogether) {

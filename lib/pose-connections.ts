@@ -1,6 +1,7 @@
 /**
- * BlazePose landmark indices used by MediaPipe's PoseLandmarker.
- * We only care about the upper body (shoulders, elbows, wrists) for CPR form tracking.
+ * BlazePose landmark indices used by MediaPipe's PoseLandmarker (33 landmarks).
+ * Only the indices referenced by CPR logic are named here; the overlay draws
+ * the full skeleton via PoseLandmarker.POSE_CONNECTIONS.
  */
 export const POSE_LANDMARK = {
   LEFT_EAR: 7,
@@ -11,15 +12,22 @@ export const POSE_LANDMARK = {
   RIGHT_ELBOW: 14,
   LEFT_WRIST: 15,
   RIGHT_WRIST: 16,
+  LEFT_HIP: 23,
+  RIGHT_HIP: 24,
 } as const
 
-export const TRACKED_LANDMARK_INDICES = Object.values(POSE_LANDMARK)
+/** Same shape as MediaPipe's `Connection` type. */
+export interface PoseConnection {
+  start: number
+  end: number
+}
 
-/** Pairs of landmark indices to draw as skeleton connection lines. */
-export const UPPER_BODY_CONNECTIONS: [number, number][] = [
-  [POSE_LANDMARK.LEFT_SHOULDER, POSE_LANDMARK.RIGHT_SHOULDER],
-  [POSE_LANDMARK.LEFT_SHOULDER, POSE_LANDMARK.LEFT_ELBOW],
-  [POSE_LANDMARK.LEFT_ELBOW, POSE_LANDMARK.LEFT_WRIST],
-  [POSE_LANDMARK.RIGHT_SHOULDER, POSE_LANDMARK.RIGHT_ELBOW],
-  [POSE_LANDMARK.RIGHT_ELBOW, POSE_LANDMARK.RIGHT_WRIST],
+/** Joints drawn larger in the overlay because CPR detection depends on them. */
+export const ARM_JOINT_INDICES = [
+  POSE_LANDMARK.LEFT_SHOULDER,
+  POSE_LANDMARK.RIGHT_SHOULDER,
+  POSE_LANDMARK.LEFT_ELBOW,
+  POSE_LANDMARK.RIGHT_ELBOW,
+  POSE_LANDMARK.LEFT_WRIST,
+  POSE_LANDMARK.RIGHT_WRIST,
 ]
