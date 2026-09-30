@@ -10,11 +10,22 @@ import { useCallHelpGesture } from "@/hooks/use-call-help-gesture"
 import { useHandPositionValidation } from "@/hooks/use-hand-position-validation"
 import { useCompressionCounter } from "@/hooks/use-compression-counter"
 import { compressionPostureMessage, usePostureVisualState } from "@/hooks/use-posture-visual-state"
+import { type MovementFeedbackKey, useCompressionMovementFeedback } from "@/hooks/use-compression-movement-feedback"
 import { cn } from "@/lib/utils"
 import type { Translations } from "@/lib/i18n"
 import type { RatingKey, SessionResult, TrainingStage } from "@/lib/types"
 
 const TARGET_COMPRESSIONS = 30
+
+const MOVEMENT_FEEDBACK_COLOR: Record<MovementFeedbackKey, string> = {
+  releaseFully: "bg-amber-500 text-white",
+  pushDeeper: "bg-amber-500 text-white",
+  pushFaster: "bg-amber-500 text-white",
+  pushSlower: "bg-amber-500 text-white",
+  goodPace: "bg-emerald-600 text-white",
+  goodCompression: "bg-emerald-600 text-white",
+  startCompressions: "bg-muted text-muted-foreground",
+}
 
 interface CprPracticeScreenProps {
   t: Translations
@@ -104,6 +115,12 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
     compressionDebug: debug,
   })
   const compressionPostureFeedback = compressionPostureMessage(debug.reason, debug.effectivePoseValid)
+  const movementFeedback = useCompressionMovementFeedback({
+    active: trainingStage === "COMPRESSIONS",
+    debug,
+    count,
+    status,
+  })
   const startTimeRef = useRef<number>(Date.now())
   const completedRef = useRef(false)
   const latestRef = useRef({ count, bpm })
@@ -209,6 +226,9 @@ export function CprPracticeScreen({ t, onComplete }: CprPracticeScreenProps) {
   } else if (compressionPostureFeedback) {
     statusText = t.training[compressionPostureFeedback]
     statusColor = "bg-red-600 text-white"
+  } else if (movementFeedback) {
+    statusText = t.training[movementFeedback]
+    statusColor = MOVEMENT_FEEDBACK_COLOR[movementFeedback]
   }
 
   return (
