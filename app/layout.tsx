@@ -3,7 +3,7 @@ import type { Metadata, Viewport } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'corCPR — Interactive CPR Training',
+  title: 'CorCpr — Interactive CPR Training',
   description:
     'Practice life-saving CPR compressions with real-time, on-device pose tracking. Available in Kazakh, Russian, and English.',
   generator: 'v0.app',
@@ -27,6 +27,7 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
+  viewportFit: 'cover',
   colorScheme: 'light dark',
   themeColor: [
     { media: '(prefers-color-scheme: light)', color: 'white' },

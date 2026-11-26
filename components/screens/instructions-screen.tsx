@@ -10,19 +10,33 @@ const INSTRUCTION_IMAGE_SRC = "/cpr-instructions.jpg"
 
 interface InstructionsScreenProps {
   t: Translations
+  backLabel: string
+  onBack: () => void
   onStart: () => void
+  homeAction?: { label: string; onClick: () => void }
 }
 
-export function InstructionsScreen({ t, onStart }: InstructionsScreenProps) {
+export function InstructionsScreen({ t, backLabel, onBack, onStart, homeAction }: InstructionsScreenProps) {
   const copy = t.instructions
+  const heading = useRef<HTMLHeadingElement>(null)
+
+  useEffect(() => {
+    window.scrollTo(0, 0)
+    heading.current?.focus({ preventScroll: true })
+  }, [])
 
   return (
     <main className="flex min-h-dvh flex-col items-center bg-gradient-to-b from-red-50 to-white px-6 py-8 dark:from-red-950/30 dark:to-background">
       <div className="flex w-full max-w-lg flex-1 flex-col">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <Button variant="outline" onClick={onBack}>{backLabel}</Button>
+          {homeAction && <button type="button" className="rounded font-bold text-red-700 focus-visible:outline-2 focus-visible:outline-offset-4"
+            onClick={homeAction.onClick} aria-label={homeAction.label}>CorCpr</button>}
+        </div>
         <InstructionImage alt={copy.title} placeholder={copy.imagePlaceholder} />
 
         <header className="mt-6 text-center">
-          <h1 className="text-balance text-2xl font-bold tracking-tight text-foreground">{copy.title}</h1>
+          <h1 ref={heading} tabIndex={-1} className="text-balance text-2xl font-bold tracking-tight text-foreground outline-none">{copy.title}</h1>
           <p className="mt-1 text-sm text-muted-foreground">{copy.subtitle}</p>
         </header>
 

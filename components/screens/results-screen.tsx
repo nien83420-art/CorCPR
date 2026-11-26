@@ -1,149 +1,67 @@
-import { CheckCircle2, CircleAlert, RotateCcw, Trophy } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { cn } from "@/lib/utils"
+import type { ReactNode } from "react"
+import type { PriorLearning } from "@/lib/course-results"
+import { courseResultsCopy } from "@/lib/course-results-copy"
 import type { Translations } from "@/lib/i18n"
-import type { ResultTipKey, SessionResult } from "@/lib/types"
+import type { Language, SessionResult } from "@/lib/types"
 
-interface ResultsScreenProps {
+export function ResultMetric({ label, value, children }: { label: string; value: ReactNode; children?: ReactNode }) {
+  return <div className="rounded-xl border border-zinc-200 bg-white p-4">
+    <dt className="text-sm font-medium text-zinc-700">{label}</dt>
+    <dd className="mt-1 text-lg font-semibold tabular-nums text-zinc-950">{value}</dd>
+    {children}
+  </div>
+}
+
+export function ResultsScreen({ language, t, result, learning }: {
+  language: Language
   t: Translations
   result: SessionResult
-  onRestart: () => void
-}
-
-const ratingStyles: Record<SessionResult["rating"], string> = {
-  excellent: "bg-emerald-600",
-  good: "bg-amber-500",
-  needsWork: "bg-red-600",
-}
-
-const POSITIVE_TIPS: ReadonlySet<ResultTipKey> = new Set<ResultTipKey>(["tipGoodRhythm", "tipGoodTechnique"])
-
-function barColor(score: number): string {
-  if (score >= 80) return "bg-emerald-600"
-  if (score >= 60) return "bg-amber-500"
-  return "bg-red-600"
-}
-
-export function ResultsScreen({ t, result, onRestart }: ResultsScreenProps) {
-  const r = t.results
-
-  return (
-    <main className="flex min-h-dvh flex-col items-center justify-center px-6 py-10">
-      <div className="w-full max-w-sm">
-        <div className="text-center">
-          <div
-            className={cn(
-              "mx-auto flex size-16 items-center justify-center rounded-full shadow-lg",
-              ratingStyles[result.rating],
-            )}
-          >
-            <Trophy className="size-8 text-white" aria-hidden="true" />
-          </div>
-          <h1 className="mt-4 text-3xl font-bold tracking-tight text-foreground">{r.title}</h1>
-          <p className="mt-1 text-lg font-medium text-foreground">{r[result.rating]}</p>
-        </div>
-
-        <section className="mt-6 rounded-2xl border border-border bg-card p-5">
-          <ScoreBar label={r.overall} hint={r.overallHint} score={result.overallScore} emptyLabel={r.notEnoughData} large />
-        </section>
-
-        <section className="mt-3 flex flex-col gap-5 rounded-2xl border border-border bg-card p-5">
-          <ScoreBar label={r.technique} hint={r.techniqueHint} score={result.techniqueScore} emptyLabel={r.notEnoughData} />
-          <ScoreBar label={r.rhythm} hint={r.rhythmHint} score={result.rhythmScore} emptyLabel={r.notEnoughData} />
-          <div>
-            <div className="flex items-baseline justify-between">
-              <span className="text-sm font-medium text-foreground">{r.compressionsLabel}</span>
-              <span className="text-lg font-bold tabular-nums text-foreground">
-                {result.totalCompressions}
-                <span className="text-sm font-medium text-muted-foreground"> / {result.targetCompressions}</span>
-              </span>
-            </div>
-            <Bar score={result.completionScore} />
-          </div>
-        </section>
-
-        <div className="mt-3 grid grid-cols-2 gap-3">
-          <StatTile label={r.avgBpm} value={result.averageBpm > 0 ? `${result.averageBpm}` : "--"} unit={t.practice.bpm} />
-          <StatTile label={r.duration} value={`${result.durationSeconds}`} unit={r.seconds} />
-        </div>
-
-        <section className="mt-3 rounded-2xl border border-border bg-card p-5">
-          <h2 className="text-sm font-semibold text-foreground">{r.tipsTitle}</h2>
-          <ul className="mt-3 flex flex-col gap-2">
-            {result.tips.map((tip) => {
-              const positive = POSITIVE_TIPS.has(tip)
-              const Icon = positive ? CheckCircle2 : CircleAlert
-              return (
-                <li key={tip} className="flex gap-2 text-sm leading-snug text-foreground">
-                  <Icon
-                    className={cn("mt-0.5 size-4 shrink-0", positive ? "text-emerald-600" : "text-amber-500")}
-                    aria-hidden="true"
-                  />
-                  {r[tip]}
-                </li>
-              )
-            })}
-          </ul>
-        </section>
-
-        <Button size="lg" onClick={onRestart} className="mt-6 h-12 w-full gap-2 bg-red-600 text-base text-white hover:bg-red-700">
-          <RotateCcw className="size-4" aria-hidden="true" />
-          {r.restart}
-        </Button>
-      </div>
-    </main>
-  )
-}
-
-function ScoreBar({
-  label,
-  hint,
-  score,
-  emptyLabel,
-  large = false,
-}: {
-  label: string
-  hint: string
-  score: number | null
-  emptyLabel: string
-  large?: boolean
+  learning: PriorLearning | null
 }) {
-  return (
-    <div>
-      <div className="flex items-baseline justify-between gap-3">
-        <span className={cn("font-medium text-foreground", large ? "text-base" : "text-sm")}>{label}</span>
-        <span className={cn("font-bold tabular-nums", large ? "text-3xl" : "text-lg", score === null ? "text-sm font-medium text-muted-foreground" : "text-foreground")}>
-          {score === null ? emptyLabel : `${score}%`}
-        </span>
-      </div>
-      <Bar score={score ?? 0} muted={score === null} />
-      <p className="mt-1.5 text-xs text-muted-foreground">{hint}</p>
-    </div>
-  )
-}
+  const copy = courseResultsCopy[language]
+  const r = t.results
+  const checks = learning?.firstChecks ?? []
+  const right = checks.filter(Boolean).length
+  const percent = (value: number | null) => value === null ? r.notEnoughData : `${value}%`
 
-function Bar({ score, muted = false }: { score: number; muted?: boolean }) {
-  return (
-    <div
-      className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-muted"
-      role="progressbar"
-      aria-valuemin={0}
-      aria-valuemax={100}
-      aria-valuenow={muted ? undefined : score}
-    >
-      {!muted && <div className={cn("h-full rounded-full", barColor(score))} style={{ width: `${score}%` }} />}
-    </div>
-  )
-}
-
-function StatTile({ label, value, unit }: { label: string; value: string; unit: string }) {
-  return (
-    <div className="rounded-2xl border border-border bg-card px-4 py-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-xl font-bold tabular-nums text-foreground">
-        {value}
-        <span className="text-sm font-medium text-muted-foreground"> {unit}</span>
-      </p>
-    </div>
-  )
+  return <div className="mt-7 grid items-start gap-5 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+    <section className="rounded-2xl border border-zinc-200 p-4 sm:p-5" aria-labelledby="camera-results">
+      <h2 id="camera-results" className="text-xl font-semibold">{copy.camera}</h2>
+      <p className="mt-2 text-sm leading-relaxed text-zinc-600">{copy.cameraNote}</p>
+      <dl className="mt-4 grid gap-2 sm:grid-cols-2">
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 sm:col-span-2">
+          <dt className="font-medium text-red-900">{r.overall}</dt>
+          <dd className="mt-1 text-2xl font-semibold tabular-nums text-red-900">{percent(result.overallScore)}</dd>
+          {result.overallScore !== null && <dd className="mt-1 text-sm text-zinc-700">{r[result.rating]}</dd>}
+        </div>
+        <ResultMetric label={r.compressionsLabel} value={`${result.totalCompressions} / ${result.targetCompressions}`}>
+          <dd className="mt-2"><progress className="block h-2 w-full accent-red-700" aria-label={r.compressionsLabel}
+            max={100} value={result.completionScore} /></dd>
+        </ResultMetric>
+        <ResultMetric label={copy.rate} value={result.averageBpm > 0 ? `${result.averageBpm} ${t.practice.bpm}` : r.notEnoughData} />
+        <ResultMetric label={r.technique} value={percent(result.techniqueScore)} />
+        <ResultMetric label={r.rhythm} value={percent(result.rhythmScore)} />
+        <ResultMetric label={r.duration} value={`${result.durationSeconds} ${r.seconds}`} />
+      </dl>
+      <h3 className="mt-5 font-semibold">{r.tipsTitle}</h3>
+      <ul className="mt-2 list-disc space-y-1 pl-5 text-sm leading-relaxed text-zinc-700">
+        {result.tips.map(tip => <li key={tip}>{r[tip]}</li>)}
+      </ul>
+    </section>
+    <section className="rounded-2xl border border-zinc-200 bg-zinc-50 p-4 sm:p-5" aria-labelledby="prior-results">
+      <h2 id="prior-results" className="text-xl font-semibold">{copy.learning}</h2>
+      {checks.length > 0 ? <>
+        <p className="mt-2 text-sm text-zinc-600">{copy.firstChecks}</p>
+        <dl className="mt-4 space-y-2 text-sm">
+          <div className="flex justify-between gap-3"><dt>{copy.attempted}</dt><dd className="font-semibold">{checks.length}</dd></div>
+          <div className="flex justify-between gap-3"><dt>{copy.right}</dt><dd className="font-semibold">{right}</dd></div>
+          <div className="flex justify-between gap-3"><dt>{copy.wrong}</dt><dd className="font-semibold">{checks.length - right}</dd></div>
+        </dl>
+      </> : <p className="mt-2 text-sm text-zinc-600">{copy.unavailable}</p>}
+      {learning && <dl className="mt-4 space-y-3 border-t border-zinc-200 pt-4 text-sm">
+        <div><dt>{copy.stack}</dt><dd className="font-semibold">{learning.handStacked ? copy.completed : copy.incomplete}</dd></div>
+        <div><dt>{copy.placement}</dt><dd className="font-semibold">{learning.chestPlaced ? copy.completed : copy.incomplete}</dd></div>
+      </dl>}
+    </section>
+  </div>
 }

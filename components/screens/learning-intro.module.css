@@ -1,0 +1,15 @@
+:global(html):has(.safeArea) {
+  --intro-safe-top: env(safe-area-inset-top, 0px);
+  scroll-padding-block-start: var(--intro-safe-top);
+}
+
+/* Keep scrolling lesson content out of the status-bar area, which the body already insets at rest. */
+.safeArea::before {
+  position: fixed;
+  z-index: 1;
+  inset: 0 0 auto;
+  block-size: var(--intro-safe-top);
+  background: inherit;
+  pointer-events: none;
+  content: "";
+}

@@ -159,5 +159,18 @@
   }
   body {
     @apply bg-background text-foreground;
+    overflow-wrap: anywhere;
+    padding-block: env(safe-area-inset-top, 0px) env(safe-area-inset-bottom, 0px);
   }
+}
+
+@utility page-gutter {
+  --page-gutter: clamp(1rem, 4vw, 2rem);
+  padding-left: calc(var(--page-gutter) + env(safe-area-inset-left, 0px));
+  padding-right: calc(var(--page-gutter) + env(safe-area-inset-right, 0px));
+}
+
+@utility min-h-page {
+  min-height: 100vh;
+  min-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
 }

@@ -1,0 +1,26 @@
+.press { animation: press 545ms ease-in-out infinite; }
+.recoil {
+  transform-origin: center bottom;
+  transform-box: fill-box;
+  animation: recoil 545ms ease-in-out infinite;
+}
+.align { animation: align 3.5s ease-in-out infinite; }
+.stack { animation: stack 3.5s ease-in-out infinite; }
+
+@keyframes press {
+  50% { transform: translateY(8px); }
+}
+@keyframes recoil {
+  50% { transform: scaleY(.82); }
+}
+@keyframes align {
+  0%, 100% { transform: none; }
+  55%, 80% { transform: translateX(13px) rotate(7deg); transform-origin: 198px 145px; }
+}
+@keyframes stack {
+  0%, 100% { transform: none; }
+  50%, 65% { transform: translate(-8px, -34px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .press, .recoil, .align, .stack { animation: none; }
+}

@@ -1,4 +1,4 @@
-export type Screen = "WELCOME" | "LANGUAGE" | "CALL_103" | "INSTRUCTIONS" | "CPR_PRACTICE" | "RESULTS"
+export type Screen = "WELCOME" | "PRACTICE_SETUP" | "LEARNING" | "INSTRUCTIONS" | "CPR_PRACTICE" | "RESULTS"
 
 /** Sequential stages of the in-practice gesture training flow, run inside CPR_PRACTICE. */
 export type TrainingStage = "CALL_HELP" | "HAND_POSITION" | "COMPRESSIONS" | "RESULTS"

@@ -1,0 +1,38 @@
+span.reveal, span.content { display: block; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .reveal[data-reveal="visible"] > .content {
+    animation: enter 920ms cubic-bezier(.22, 1, .36, 1) var(--reveal-delay, 0ms) backwards;
+  }
+
+  .subtle[data-reveal="visible"] > .content {
+    animation: enter-subtle 400ms cubic-bezier(.22, 1, .36, 1) var(--reveal-delay, 0ms) backwards;
+  }
+
+  .reveal:has(:focus-visible:is(a, button, input, select, textarea, [tabindex="0"])) > .content,
+  .subtle:has(summary:focus-visible) > .content {
+    animation: none;
+  }
+
+  @keyframes enter {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @keyframes enter-subtle {
+    from {
+      opacity: .25;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+}

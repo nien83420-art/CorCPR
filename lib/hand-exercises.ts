@@ -1,0 +1,121 @@
+import type { Language } from "./types"
+
+export type Point = { x: number; y: number }
+
+export const sternumTarget: readonly Point[] = [
+  { x: 188, y: 157 }, { x: 212, y: 157 }, { x: 213, y: 186 },
+  { x: 208, y: 206 }, { x: 192, y: 206 }, { x: 187, y: 186 },
+]
+
+export function isInsideSternum(point: Point) {
+  return sternumTarget.every((start, index) => {
+    const end = sternumTarget[(index + 1) % sternumTarget.length]
+    return (end.x - start.x) * (point.y - start.y) >= (end.y - start.y) * (point.x - start.x)
+  })
+}
+
+export function heelsAlign(lower: Point, upper: Point) {
+  return Math.hypot(upper.x - lower.x, upper.y - lower.y) <= 10
+}
+
+export const handExerciseCopy = {
+  ru: {
+    titles: ["Как сложить руки?", "Куда поставить руки?"],
+    stack: "Положите основание одной ладони на тыльную сторону другой. Сцепите пальцы. Попробуйте повторить это на экране.",
+    place: "Перетащите сложенные руки в центр груди — на нижнюю половину грудины.",
+    keys: "Выберите подвижную кисть клавишей Tab. Перемещайте её стрелками. Shift + стрелка делает шаг меньше.",
+    stackKeys: "Выберите любую кисть клавишей Tab и перемещайте её стрелками. Shift + стрелка делает шаг меньше.",
+    upper: "Верхняя кисть",
+    lower: "Нижняя кисть",
+    both: "Сложенные руки",
+    heel: "Метка отмечает основание нижней ладони",
+    upperHeel: "Контурная метка отмечает основание верхней ладони",
+    contactArea: "Пунктир показывает основание нижней ладони.",
+    placementMarker: "Основание нижней ладони",
+    anatomy: "Грудина",
+    diagram: "Кисти для упражнения на положение рук",
+    torso: "Грудная клетка взрослого, вид спереди",
+    rotate: "Повернуть кисть",
+    lock: "Сцепить пальцы",
+    unlock: "Расцепить пальцы",
+    lockHint: "Совместите метки и направьте пальцы в одну сторону.",
+    alignment: "Совместите метки на основаниях ладоней.",
+    angle: "Поверните верхнюю кисть, чтобы пальцы смотрели в одну сторону.",
+    fingers: "Сцепите пальцы.",
+    stackSuccess: "Верно! Одна ладонь расположена поверх другой, пальцы сцеплены.",
+    tooHigh: "Переместите основание ладони ниже по грудине.",
+    tooLow: "Переместите основание ладони выше, подальше от нижнего кончика грудины.",
+    offCenter: "Переместите основание ладони к середине грудины.",
+    placeSuccess: "Верно! Основание нижней ладони находится на нижней половине грудины. Не давите на рёбра и нижний кончик грудины.",
+    area: "Допустимая область на нижней половине грудины",
+    disclaimer: "Упражнение помогает запомнить положение рук. Практический навык отрабатывается на манекене с инструктором.",
+    keyboardHelp: "Управление с клавиатуры",
+    camera: "Перейти к тренировке с камерой",
+  },
+  kk: {
+    titles: ["Қолды қалай беттестіреміз?", "Қолды қай жерге қою керек?"],
+    stack: "Бір алақанның түбін екінші қолдың сыртына қойыңыз. Саусақтарыңызды айқастырыңыз. Осыны экранда қайталап көріңіз.",
+    place: "Беттестірілген қолдарды кеуденің ортасына, төс сүйегінің төменгі жартысына сүйреп апарыңыз.",
+    keys: "Жылжитын қолды Tab пернесімен таңдаңыз. Оны бағыттауыш пернелермен жылжытыңыз. Shift пен бағыттауыш пернені бірге басқанда қадам қысқарады.",
+    stackKeys: "Кез келген қолды Tab пернесімен таңдап, бағыттауыш пернелермен жылжытыңыз. Shift пернесін басып тұрсаңыз, қадам қысқарады.",
+    upper: "Үстіңгі қол",
+    lower: "Астыңғы қол",
+    both: "Беттестірілген қолдар",
+    heel: "Белгі астыңғы алақанның түбін көрсетеді",
+    upperHeel: "Жиекті белгі үстіңгі алақанның түбін көрсетеді",
+    contactArea: "Үзік сызық астыңғы алақанның түбін көрсетеді.",
+    placementMarker: "Астыңғы алақанның түбі",
+    anatomy: "Төс сүйегі",
+    diagram: "Қолды дұрыс қоюға арналған жаттығу сызбасы",
+    torso: "Ересек адамның кеудесі, алдынан көрініс",
+    rotate: "Қолды бұру",
+    lock: "Саусақтарды айқастыру",
+    unlock: "Саусақтарды ажырату",
+    lockHint: "Белгілерді беттестіріп, саусақтарды бір бағытқа бұрыңыз.",
+    alignment: "Алақан түбіндегі белгілерді беттестіріңіз.",
+    angle: "Үстіңгі қолды саусақтар бір бағытқа қарайтындай бұрыңыз.",
+    fingers: "Саусақтарды айқастырыңыз.",
+    stackSuccess: "Дұрыс! Бір қол екіншісінің үстінде, саусақтар айқастырылған.",
+    tooHigh: "Алақан түбін төс сүйегінің бойымен төменірек жылжытыңыз.",
+    tooLow: "Алақан түбін төс сүйегінің төменгі ұшынан жоғарырақ жылжытыңыз.",
+    offCenter: "Алақан түбін төс сүйегінің ортасына жылжытыңыз.",
+    placeSuccess: "Дұрыс! Астыңғы алақанның түбі төс сүйегінің төменгі жартысында тұр. Қабырғаларға және төс сүйегінің төменгі ұшына баспаңыз.",
+    area: "Төс сүйегінің төменгі жартысындағы дұрыс аймақ",
+    disclaimer: "Жаттығу қолдың қалпын есте сақтауға көмектеседі. Практикалық дағдыны нұсқаушымен бірге манекенде жаттықтырыңыз.",
+    keyboardHelp: "Пернетақтамен басқару",
+    camera: "Камерамен жаттығуға өту",
+  },
+  en: {
+    titles: ["How do you stack your hands?", "Where do the hands go?"],
+    stack: "Place the heel of one hand on the back of the other. Interlock your fingers. Try it on screen.",
+    place: "Drag the stacked hands to the centre of the chest, on the lower half of the breastbone.",
+    keys: "Use Tab to focus the movable hand, then move it with the arrow keys. Hold Shift to take smaller steps.",
+    stackKeys: "Use Tab to select either hand and the arrow keys to move it. Hold Shift to take smaller steps.",
+    upper: "Upper hand",
+    lower: "Lower hand",
+    both: "Stacked hands",
+    heel: "The solid marker shows the heel of the lower hand",
+    upperHeel: "The outlined marker shows the heel of the upper hand",
+    contactArea: "The dashed outline shows the heel of the lower hand.",
+    placementMarker: "Heel of the lower hand",
+    anatomy: "Breastbone",
+    diagram: "Hand positioning exercise",
+    torso: "Adult chest, front view",
+    rotate: "Rotate hand",
+    lock: "Interlock fingers",
+    unlock: "Release fingers",
+    lockHint: "Line up the markers and point the fingers the same way.",
+    alignment: "Line up the heel markers.",
+    angle: "Rotate the upper hand until the fingers point the same way.",
+    fingers: "Interlock your fingers.",
+    stackSuccess: "Correct! One hand is on top of the other and the fingers are interlocked.",
+    tooHigh: "Move the heel down along the breastbone.",
+    tooLow: "Move the heel up, away from the bottom tip of the breastbone.",
+    offCenter: "Move the heel towards the centre of the breastbone.",
+    placeSuccess: "Correct! The heel of the lower hand is on the lower half of the breastbone. Avoid pressing on the ribs or the bottom tip of the breastbone.",
+    area: "Acceptable area on the lower half of the breastbone",
+    disclaimer: "This exercise helps you remember where your hands go. Practise the physical skill on a manikin with an instructor.",
+    keyboardHelp: "Keyboard controls",
+    camera: "Go to camera practice",
+  },
+} satisfies Record<Language, Record<string, string | string[]>>

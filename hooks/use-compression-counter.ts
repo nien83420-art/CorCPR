@@ -121,6 +121,8 @@ interface CompressionDebug {
 interface UseCompressionCounterResult {
   count: number
   bpm: number | null
+  /** Time of the most recent BPM calculation on the performance.now() clock. */
+  bpmUpdatedAt: number | null
   status: CompressionStatus
   reset: () => void
   /** Feed the latest pose landmarks in; call every detection frame. */
@@ -154,6 +156,7 @@ const INITIAL_DEBUG: CompressionDebug = {
 export function useCompressionCounter(targetCount: number): UseCompressionCounterResult {
   const [count, setCount] = useState(0)
   const [bpm, setBpm] = useState<number | null>(null)
+  const [bpmUpdatedAt, setBpmUpdatedAt] = useState<number | null>(null)
   const [status, setStatus] = useState<CompressionStatus>("waiting")
   const [debug, setDebug] = useState<CompressionDebug>(INITIAL_DEBUG)
 
@@ -194,6 +197,7 @@ export function useCompressionCounter(targetCount: number): UseCompressionCounte
     countRef.current = 0
     setCount(0)
     setBpm(null)
+    setBpmUpdatedAt(null)
     setStatus("waiting")
     setDebug(INITIAL_DEBUG)
   }, [])
@@ -463,6 +467,7 @@ export function useCompressionCounter(targetCount: number): UseCompressionCounte
                     const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length
                     const nextBpm = Math.round(60000 / avgInterval)
                     setBpm(nextBpm)
+                    setBpmUpdatedAt(now)
                     setStatus(nextBpm < 100 ? "too-slow" : nextBpm > 120 ? "too-fast" : "good")
                   }
                 }
@@ -523,5 +528,5 @@ export function useCompressionCounter(targetCount: number): UseCompressionCounte
     [targetCount],
   )
 
-  return { count, bpm, status, reset, update, debug }
+  return { count, bpm, bpmUpdatedAt, status, reset, update, debug }
 }
